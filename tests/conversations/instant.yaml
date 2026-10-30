@@ -1,0 +1,22 @@
+# Commands that should stay instant (no model), and one that mixes two and so needs the brain.
+name: Instant commands
+turns:
+  - user: "Volume up."
+    expect: {instant: true, tools: [system_control]}
+    results:
+      system_control: {text: "Volume 40% -> 50%.", say: "Volume's at 50%."}
+  - user: "Turn it down a bit."
+    expect: {instant: true, tools: [system_control]}
+    results:
+      system_control: {text: "Volume 50% -> 40%.", say: "Volume's at 40%."}
+  - user: "Pause."
+    expect: {instant: true, tools: [media_control]}
+    results:
+      media_control: {text: "Paused.", say: "Paused."}
+  - user: "What time is it?"
+    expect: {instant: true}
+  - user: "Turn it down and open Spotify."
+    expect: {tools: [system_control, open_app]}
+    results:
+      system_control: {text: "Volume 40% -> 30%.", say: "Volume's at 30%."}
+      open_app: {text: "Launched Spotify.", say: "Opening Spotify."}

@@ -1,0 +1,9 @@
+# The memory tool is faked too, so profile.yaml is never changed by a replay.
+name: Remembering a preference
+turns:
+  - user: "Remember that I prefer Chrome."
+    expect: {tools: [memory]}
+    results:
+      memory: {text: "Remembered: I prefer Chrome.", say: "I'll remember that."}
+  - user: "Which browser do I like?"
+    expect: {talk: true, avoid: [web, open_app]}

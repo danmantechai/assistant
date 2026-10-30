@@ -1,0 +1,480 @@
+# Semantic router intents. The router embeds every example once (cached in data/router_cache.npz,
+# re-embedded only when this file changes) and matches requests by meaning, so paraphrases work.
+#
+# Per intent:
+#   tool      tool to run directly (none = the router answers itself, e.g. time_date)
+#   slots     which slot extractor fills the tool's arguments (see mary/router/slots.py)
+#   group     intents whose confusion doesn't matter because the slot step tells them apart
+#             (e.g. "open youtube" vs "open spotify"): margin is measured against other groups
+#   strip     regexes removed before slot extraction ("open", "fire up", "get ... going")
+#   llm_if    regex: if it matches, the request goes to the LLM even when the intent is clear
+#   lead      regex on the request's first words that picks the intent without the score test
+#             ("remember …": the free text after it would otherwise decide the match)
+#   replies   spoken templates ({say} = the tool's own reply; slot names also work)
+#   examples  10-20 varied ways of asking
+
+intents:
+  open_app:
+    tool: open_app
+    slots: app
+    group: open
+    strip: ['\bopen( up)?\b', '\blaunch\b', '\bstart( up)?\b', '\bfire up\b', '\brun\b', '\bbring up\b',
+            '\bload( up)?\b', '\bboot( up)?\b', '\bpull up\b', '\bget\b', '\bgoing\b', '\bapp\b',
+            '\bapplication\b', '\bprogram\b', '\bfor me\b', '\bi need\b', '\bthe\b', '\bmy\b']
+    replies: ['{say}', 'Opening {app}.', '{app}, coming up.']
+    examples:
+      - open spotify
+      - launch chrome
+      - fire up vs code
+      - can you start discord
+      - get notepad going
+      - open the calculator
+      - start word
+      - bring up file explorer
+      - run task manager
+      - open my browser
+      - launch the settings app
+      - pull up excel
+      - open up teams
+      - load paint for me
+      - I need the terminal
+      - boot up steam
+      - launch microsoft word
+      - open google chrome
+      - get discord running
+
+  close_app:
+    tool: close_app
+    slots: running_app
+    strip: ['\bclose( down)?\b', '\bquit\b', '\bexit\b', '\bkill\b', '\bshut( down)?\b', '\bterminate\b',
+            '\bget rid of\b', '\bout of\b', '\bapp\b', '\bwindow\b', '\bprogram\b', '\bthe\b', '\bmy\b',
+            '\bfor me\b', '\bplease\b']
+    llm_if: '\b(all|every|everything|other)\b'
+    examples:
+      - close spotify
+      - quit chrome
+      - exit notepad
+      - shut down discord
+      - close the calculator
+      - kill steam
+      - get rid of the settings window
+      - close word
+      - quit out of teams
+      - terminate task manager
+      - close my browser
+      - exit file explorer
+      - close down vs code
+
+  window_control:
+    tool: window_control
+    slots: window
+    examples:
+      - minimize this window
+      - maximize spotify
+      - snap notepad to the left
+      - put chrome on the right half
+      - switch to discord
+      - go to my browser window
+      - restore the window
+      - make this window full screen
+      - hide this window
+      - snap this to the right
+      - bring spotify to the front
+      - focus on word
+      - minimise the calculator
+      - move this window to the left side
+      - un-maximize this
+
+  volume:
+    tool: system_control
+    slots: volume
+    examples:
+      - turn the volume down a bit
+      - turn it up
+      - volume up
+      - make it louder
+      - lower the volume
+      - set volume to 30
+      - volume 50 percent
+      - mute
+      - unmute the sound
+      - max volume
+      - turn the sound down
+      - it's too loud
+      - I can't hear it, turn it up
+      - put the volume at half
+      - silence the computer
+      - quieter please
+      - crank it up
+
+  brightness:
+    tool: system_control
+    slots: brightness
+    examples:
+      - turn the brightness up
+      - make the screen brighter
+      - dim the screen
+      - lower the brightness a bit
+      - set brightness to 70
+      - brightness 40 percent
+      - the screen is too bright
+      - max brightness
+      - make the display darker
+      - brightness down
+      - I can't see the screen, make it brighter
+      - put brightness at half
+
+  media:
+    tool: media_control
+    slots: media
+    group: music
+    examples:
+      - pause
+      - pause the music
+      - resume
+      - play
+      - unpause
+      - next song
+      - skip this track
+      - previous song
+      - go back a track
+      - stop the music
+      - skip
+      - continue playing
+      - last song
+      - hold the music
+      - next one
+
+  play_music:
+    tool: play_music
+    slots: music_query
+    group: music
+    strip: ['\bplay\b', '\bput on\b', '\bqueue up\b', "\\blet'?s (hear|listen to)\\b", '\bi want to (hear|listen to)\b',
+            "\\bi'?d like to (hear|listen to)\\b", '\blisten to\b', '\bspin\b', '\bon spotify\b', '\bfrom spotify\b',
+            '\bfor me\b', '\bme\b', '\bus\b', '\bsome\b', '\ba bit of\b', '\bsongs by\b', '\bmusic by\b',
+            '\bplease\b']
+    examples:
+      - play some country music
+      - play Don Williams
+      - put on some jazz
+      - I want to listen to Hillsong worship
+      - play music
+      - play some music on spotify
+      - let's hear some reggae
+      - play Bohemian Rhapsody
+      - put on my liked songs
+      - play something relaxing
+      - queue up some gospel music
+      - play songs by Adele
+      - I'd like to hear some afrobeats
+      - play the Lion King soundtrack
+      - spin some old school hip hop
+      - play country side music
+      - put on Bob Marley
+      - put on some Dolly Parton
+      - play Celine Dion
+
+  check_messages:
+    tool: check_messages
+    slots: none
+    llm_if: '\b(what did|what does|what is|read|say|said|reply|respond|send|text him|text her)\b'
+    examples:
+      - do I have any new messages
+      - check my whatsapp
+      - any messages
+      - did anyone text me
+      - check my messages
+      - see if I have any message
+      - who messaged me
+      - any new chats on whatsapp
+      - have I got any unread messages
+      - is there anything new on whatsapp
+      - check if anybody sent me something
+      - any whatsapp messages for me
+
+  lock_pc:
+    tool: system_control
+    slots: lock
+    examples:
+      - lock the computer
+      - lock my pc
+      - lock the screen
+      - lock it up
+      - I'm stepping away, lock the laptop
+      - lock windows
+      - secure the computer
+      - lock my screen please
+      - lock down the pc
+      - put the lock screen on
+
+  time_date:
+    tool: none
+    slots: time_date
+    llm_if: '\btime (is it )?in\b|\bin [a-z]+ (time|now)\b|\btime zone\b|\buntil\b|\bhow long\b|\bago\b'
+    examples:
+      - what time is it
+      - what's the time
+      - tell me the time
+      - what day is it
+      - what's today's date
+      - what is the date today
+      - which day of the week is it
+      - time please
+      - do you know what time it is
+      - what's the date
+      - what month is it
+      - current time
+
+  system_status:
+    tool: get_system_status
+    slots: status
+    examples:
+      - how's my battery
+      - what's my battery level
+      - how much battery do I have left
+      - how much ram am I using
+      - what's the cpu usage
+      - system status
+      - how much disk space is left
+      - is my laptop charging
+      - how long has the computer been on
+      - how's the pc doing
+      - check memory usage
+      - how full is my hard drive
+      - battery percentage
+
+  open_website:
+    tool: web
+    slots: site
+    group: open
+    strip: ['\bopen( up)?\b', '\bgo to\b', '\bvisit\b', '\btake me to\b', '\bnavigate to\b', '\bbring up\b',
+            '\bload\b', '\bpull up\b', '\bshow me\b', '\bthe\b', '\bwebsite\b', '\bsite\b', '\bweb page\b',
+            '\bpage\b', '\bin (the|my) browser\b', '\bfor me\b', '\bmy\b']
+    examples:
+      - open youtube
+      - go to gmail
+      - open github.com
+      - take me to reddit
+      - visit wikipedia
+      - open the bbc website
+      - go to amazon
+      - navigate to netflix
+      - open whatsapp web
+      - pull up google maps
+      - open outlook in the browser
+      - load stackoverflow.com
+      - open twitter.com
+      - go to bbc.co.uk
+      - open facebook
+
+  web_search:
+    tool: web
+    slots: search_query
+    group: lookup
+    # Search topics are arbitrary, so similarity stays lower than for fixed commands. The slot step
+    # only accepts requests that start with a search verb, which makes the lower bar safe.
+    direct_score: 0.72
+    strip: ['\bsearch( the web| google| online| the internet)?( for)?\b', '\bgoogle\b', '\blook up\b',
+            '\bfind (me )?(information|info|stuff) (on|about)\b', '\bweb search( for)?\b',
+            '\bdo a search (for|on)\b', '\bsearch up\b', '\bon (the web|google|the internet)\b', '\bfor me\b',
+            '^\W*(find|look for|get me)\b']
+    examples:
+      - search for chicken curry recipes
+      - google how to tie a tie
+      - look up the weather in Lisbon
+      - search the web for cheap flights to London
+      - find information about black holes
+      - search online for python tutorials
+      - do a search for best laptops 2026
+      - google premier league table
+      - look up the meaning of serendipity
+      - search for news about Ghana
+      - web search electric cars
+      - search up how to make fufu
+      - search for cheap hotels in Lisbon
+      - google best phones under 300 dollars
+      - look up how far away the moon is
+      - search for jobs near me
+      - search youtube for cooking videos
+      - find funny cat videos on youtube
+      - look up MrBeast on YouTube
+      - search youtube for Don Williams songs
+      - find a video about fixing a bike on youtube
+
+  find_files:
+    tool: find_files
+    slots: files
+    strip: ['\bfind\b', '\blook for\b', '\blocate\b', '\bsearch (my|for|through)\b', '\bwhere (is|are|did i (save|put))\b',
+            '\bshow me\b', '\bget me\b', '\bthe\b', '\bmy\b', '\ba\b', '\ban\b', '\bfiles?\b', '\bfolder\b',
+            '\bi (downloaded|saved|made|created|got|received|wrote)\b', '\bthat\b', '\bwhich\b', '\bcalled\b',
+            '\bnamed\b', '\babout\b', '\bfrom\b', '\bin\b', '\bon\b', '\bfor me\b']
+    llm_if: '\b(biggest|largest|smallest|oldest|compare|delete|move|rename|copy|all of)\b'
+    examples:
+      - find the PDF I downloaded this week
+      - where is my resume
+      - find my tax documents
+      - look for the spreadsheet I saved yesterday
+      - show me the photos I downloaded today
+      - find files called budget
+      - locate my CV
+      - find the presentation from last week
+      - where did I save the invoice
+      - find the word document about the project
+      - search my documents for the contract
+      - find my recent downloads
+      - find the zip file I downloaded
+      - where are my screenshots
+      - what's in my downloads folder
+      - list the files in my downloads
+      - show me what I downloaded today
+      - give me a list of images in my downloads folder
+      - check if I have any new files downloaded today
+      - do I have any PDFs in my documents
+      - what did I download this week
+      - any new files on my desktop
+      - show me the files on my desktop
+      - files in my downloads folder
+
+  weather:
+    tool: check_weather
+    slots: weather
+    group: lookup     # "google the weather in Paris" is a web search: the slot step tells them apart
+    examples:
+      - what's the weather
+      - what is the current weather
+      - how's the weather today
+      - what's the weather like outside
+      - is it raining
+      - is it going to rain today
+      - how hot is it outside
+      - what's the temperature outside
+      - weather in Paris
+      - what's the weather like tomorrow
+      - do I need an umbrella today
+      - how cold is it
+      - check the weather
+      - weather please
+
+  # Acting on what's on screen, in any app: "click subscribe", "press the play button", "pick the one
+  # where it says …". Keys ("press enter") go to the LLM, which uses the keyboard tool.
+  click:
+    tool: screen
+    slots: click
+    lead: '^(click|tap|press|hit|select|choose|pick)\b'
+    examples: []
+
+  scroll:
+    tool: screen
+    slots: scroll
+    lead: '^(scroll|page (up|down)$|go (up|down)( a bit| a little)?$|(go|scroll) to the (top|bottom)\b)'
+    examples: []
+
+  # "open my downloads folder": File Explorer on that folder. ("Show me my downloads" lists the files.)
+  open_folder:
+    tool: file_action
+    slots: folder
+    lead: '^(open|go to|take me to|bring up|pull up)\s+(up\s+)?(my |the )?((downloads?|documents|desktop)( folder)?|(pictures|photos|music|videos) folder)\s*$'
+    examples: []    # chosen by `lead` only, so it never competes with other intents on similarity
+
+  # Right after a file search: "open the newest one", "open it", "play the video". The slot step
+  # checks there was a search in the last 15 minutes; otherwise the request goes to the LLM.
+  open_found:
+    tool: file_action
+    slots: found_file
+    lead: '^(open|play|show( me)?|view|watch|launch|start|run)\s+(it|that|this|(the |that |this )?(first|second|third|fourth|fifth|newest|latest|most recent|oldest|top|last|1st|2nd|3rd|4th|5th)( one| file| \w+)?|number \w+|(the |that |this )(file|one|video|pdf|picture|photo|image|document|song|spreadsheet|presentation|zip|recording|clip|movie)s?)\s*$'
+    examples: []    # chosen by `lead` only, so it never competes with other intents on similarity
+
+  type_text:
+    tool: keyboard
+    slots: dictation
+    lead: '^(type|write|dictate)\b'   # typing always starts like this; the words after it can be anything
+    # Dictated words make similarity lower than for fixed commands; the slot step only accepts
+    # requests that start with type/write, which makes the lower bar safe.
+    direct_score: 0.70
+    # "write me a poem" is composing (the LLM's job), not typing what was said.
+    llm_if: '\b(password|email address|my address|phone number|translate|summari[sz]e|reply)\b|\bwrite (me |us )?(a|an|some|my) (poem|story|e-?mail|letter|essay|song|message|summary|paragraph|speech|joke|response|note|list)\b'
+    examples:
+      - type hello world
+      - write the following text
+      - write the following text in it
+      - "type this: see you at five"
+      - write happy birthday in it
+      - write Daniel is a good boy
+      - type thank you very much
+      - "put this text in: the meeting moved to Monday"
+      - type out good morning everyone
+      - write down call the bank tomorrow
+      - type the following
+      - write this down for me
+      - enter the text dear sir
+
+  remember:
+    tool: memory
+    slots: remember
+    lead: '^(remember|keep in mind|make a note that|note that)\b'
+    # Questions ("do you remember…?") and reminders ("remember to call mum") aren't facts to keep.
+    llm_if: '\?\s*$|^\W*(do|did|what|when|where|can) you\b|\bremember (to|when|what|how|if|whether|who|where)\b'
+    examples:
+      - remember that I prefer tea to coffee
+      - please remember my sister's name is Ama
+      - remember I wake up at six
+      - remember my car is a Toyota
+      - "remember this: the spare key is in the drawer"
+      - remember that my birthday is the fifth of May
+      - keep in mind that I work from home on Fridays
+      - remember my doctor is called Dr Mensah
+
+  forget:
+    tool: memory
+    slots: forget
+    lead: '^(forget|stop remembering)\b'
+    examples:
+      - forget that I prefer tea
+      - forget what I said about my car
+      - stop remembering my birthday
+      - forget about the spare key
+
+  my_name:
+    tool: memory
+    slots: name
+    lead: '^(my name is|my name''s|(you can )?call me|i''m called|i am called)\b'
+    llm_if: '\bcall me (a|an|the|when|later|back|tomorrow|tonight|if|on|at|in)\b'
+    examples:
+      - my name is Sam
+      - call me Sam
+      - you can call me Ama
+      - I'm called Kofi
+      - please call me Grace
+      - my name's Daniel
+
+  take_screenshot:
+    tool: take_screenshot
+    slots: none
+    examples:
+      - take a screenshot
+      - screenshot
+      - capture the screen
+      - grab a screenshot
+      - save a picture of my screen
+      - take a screen capture
+      - screenshot this
+      - snap the screen
+      - take a picture of the screen
+      - print screen
+
+  timer:
+    tool: set_timer
+    slots: timer
+    examples:
+      - set a timer for 5 minutes
+      - timer 10 minutes
+      - remind me in 20 minutes
+      - start a 30 second timer
+      - set a timer for an hour
+      - countdown 2 minutes
+      - set a pasta timer for 12 minutes
+      - wake me in 15 minutes
+      - give me a timer for a minute and a half
+      - start a timer for half an hour
+      - set a 3 minute timer for the tea
+      - timer for 90 seconds

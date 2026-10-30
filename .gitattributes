@@ -1,0 +1,4 @@
+# Windows line endings in the working tree for batch files; everything else as-is.
+* text=auto
+*.bat text eol=crlf
+*.png binary

@@ -1,0 +1,12 @@
+# Small talk and feelings: no tool should run; she should talk like a person.
+name: Small talk and feelings
+turns:
+  - user: "Good morning, Mom."
+    expect: {talk: true}
+  - user: "Yeah, how are you doing?"
+    expect: {talk: true, avoid: [get_system_status]}
+  - user: "I'm not feeling well. What do you think I should do?"
+    expect: {talk: true, avoid: [power, system_control, media_control, play_music]}
+  - user: "You just never mind. It's all good."
+    expect: {avoid: [web, find_files]}
+  - user: "Thank you."

@@ -1,0 +1,8 @@
+name: Weather and a follow-up
+turns:
+  - user: "What's the weather like in Paris?"
+    expect: {tools: [check_weather], avoid: [web]}
+    results:
+      check_weather: {text: "Weather in Paris: Patchy rain nearby, 27°C, feels like 30°C, humidity 79%.", say: "In Paris it's 27 degrees with patchy rain nearby."}
+  - user: "Should I take an umbrella?"
+    expect: {talk: true, avoid: [web, check_weather]}

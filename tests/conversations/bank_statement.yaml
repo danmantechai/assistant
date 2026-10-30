@@ -1,0 +1,21 @@
+# From the 26 Oct transcript: she played music for "Try", web-searched a personal file, and glued the search
+# words into "bank statements containing bank statements".
+name: Bank statement
+turns:
+  - user: "Try and check my bank statement for me."
+    expect: {avoid: [media_control, play_music, web]}
+    results:
+      find_files: |-
+        2 pdf file(s) in Desktop, Documents, Downloads, newest first:
+        1. Bank Statement October 2026.pdf (Documents, 3 days ago)
+        2. Bank Statement September 2026.pdf (Documents, 5 weeks ago)
+        Newest first; use the number as file_action path.
+  - user: "I have my bank statements in documents. See if you can find a PDF containing my bank statements and check it out for me."
+    expect: {tools: [find_files, file_action], avoid: [web]}
+    results:
+      find_files: |-
+        2 pdf file(s) in Documents, newest first:
+        1. Bank Statement October 2026.pdf (Documents, 3 days ago)
+        2. Bank Statement September 2026.pdf (Documents, 5 weeks ago)
+        Newest first; use the number as file_action path.
+      file_action: {text: "Opened C:\\Users\\sam\\Documents\\Bank Statement October 2026.pdf.", say: "Opening Bank Statement October 2026.pdf."}

@@ -1,0 +1,12 @@
+.venv/
+data/
+logs/
+__pycache__/
+*.pyc
+.pytest_cache/
+# Local secrets written by `elevenlabs onboard`
+/.env
+# Your private folder: your settings, profile, personas and memory. Never published.
+/user/
+# Where an older MARY kept your profile (it now lives in user/)
+/profile.yaml

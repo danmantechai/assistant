@@ -1,0 +1,11 @@
+# The old model invented a video address here. She must search, then click a real result.
+name: A MrBeast video
+turns:
+  - user: "Check YouTube and see if you can get me one of MrBeast's videos."
+    expect: {tools: [web], avoid_calls: ["web:open_url"]}
+    results:
+      web: {text: "Opened a web search for 'MrBeast' on youtube in the browser. The results haven't been read; read_screen can read them.", say: "Here's YouTube's results for MrBeast."}
+  - user: "Play the first one."
+    expect: {tools: [screen], avoid_calls: ["web:open_url"]}
+    results:
+      screen: {text: "Clicked 'I Spent 7 Days Buried Alive' (video 1).", say: "Playing it."}

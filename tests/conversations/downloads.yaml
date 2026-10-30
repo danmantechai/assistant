@@ -1,0 +1,16 @@
+name: Recent downloads
+turns:
+  - user: "What did I download this week?"
+    expect: {tools: [find_files], avoid: [web]}
+    results:
+      find_files: |-
+        4 file(s) in Downloads, newest first:
+        1. promo-30s.mp4 (Downloads, today)
+        2. Invoice 1043.pdf (Downloads, yesterday)
+        3. python-3.12.10-amd64.exe (Downloads, 3 days ago)
+        4. Photos from Lisbon.zip (Downloads, 5 days ago)
+        Newest first; use the number as file_action path.
+  - user: "Open the newest one."
+    expect: {tools: [file_action], avoid: [web]}
+    results:
+      file_action: {text: "Opened C:\\Users\\sam\\Downloads\\promo-30s.mp4.", say: "Opening promo-30s.mp4."}

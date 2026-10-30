@@ -1,0 +1,17 @@
+# From 27 Oct, 07:38 (voice, Claude Code in front). Speech to text heard "Claude Code" as "plot code"; the model
+# asked read_screen for a window called "plot code", then "active window", both failed, and it never read the screen.
+name: Plan my day (look at my screen)
+active_window: {title: Claude, exe: claude.exe}
+turns:
+  - user: "Can you plan my day for me?"
+    expect: {avoid: [power, find_files, read_screen]}
+  - user: "I need to mark some papers. I need to add some classes. Yes, I need to also work on some projects on my PC. If you check my screen, you can see that I'm working in plot code. So these are the things I need to do. But I haven't really scheduled them on my timeline yet. So using your own speciality, plan my day for me."
+    expect: {tools: [read_screen], avoid: [find_files, power]}
+    results:
+      read_screen: |-
+        Window 'Claude' (ui):
+        Code · MARY
+        Brave search for MARY
+        You: what do you think about this brave search mcp server
+        Claude: I'd use Brave's search service, but call it directly from a small search brick.
+        Reply to Claude…

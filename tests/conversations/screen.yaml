@@ -1,0 +1,13 @@
+# From 27 Oct: split in two, and the second half got the router's guess "time and date".
+name: Screenshot and describe
+turns:
+  - user: "Take a picture of my screen and tell me what you see."
+    expect: {tools: [take_screenshot, read_screen]}
+    results:
+      take_screenshot: {text: "Saved screenshot to C:\\Users\\sam\\Pictures\\MARY\\Screenshot 2026-10-27 02-25.png.", say: "Got it. It's in Pictures, MARY folder."}
+      read_screen: |-
+        Window 'core.py - MARY - Visual Studio Code' (UI Automation):
+        core.py  voice.py  agent.py
+        def handle(self, text: str, think: bool = False, prefill: bool = True) -> Latency:
+        PROBLEMS 0  OUTPUT  TERMINAL
+        PS C:\backup\backup\MARY> ./run.bat

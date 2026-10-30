@@ -1,0 +1,51 @@
+# MARY: fully local voice assistant (Windows, Python 3.12, CPU only, no PyTorch)
+
+# --- Core / brain ---
+pyyaml>=6.0
+numpy>=1.26
+ollama>=0.6.3              # official client; native tool calling + per-request `think`
+rapidfuzz>=3.14            # fuzzy app / window matching
+psutil>=7.0
+
+# --- Windows PC control ---
+pywin32>=311               # win32gui/win32com (windows, shortcuts, Windows Search index)
+pywinauto>=0.6.9           # reliable window focusing
+comtypes>=1.4.8
+pycaw>=20260927            # master volume
+screen-brightness-control>=0.27
+pyautogui>=0.9.54          # hotkeys, screenshots (pulls in pygetwindow)
+send2trash>=2.1            # Recycle Bin instead of permanent deletes
+pillow>=10.3
+
+# --- Seeing the screen: Windows' built-in OCR (pywinrt), for apps that hide text from UI Automation ---
+winrt-Windows.Media.Ocr>=3.0
+winrt-Windows.Graphics.Imaging>=3.0
+winrt-Windows.Storage.Streams>=3.0
+winrt-Windows.Foundation>=3.0
+winrt-Windows.Foundation.Collections>=3.0
+winrt-Windows.Globalization>=3.0
+
+# --- Phase 2: semantic router ---
+fastembed>=0.9.1           # ONNX embeddings (BAAI/bge-small-en-v1.5)
+
+# --- Phase 3: HUD ---
+# PySide6 + QtWebEngine (pulls in PySide6-Addons and -Essentials). pywebview was tried first, but on
+# Windows its WebView2 window can't be transparent, so the HUD would be an opaque box.
+PySide6-WebEngine>=6.12
+
+# --- Phase 4: voice ---
+onnxruntime>=1.20          # Silero VAD (raw .onnx), openWakeWord, Kokoro
+sounddevice>=0.5
+scipy>=1.11                # the noise filter in front of Whisper (spectral gating)
+openwakeword==0.6.0
+faster-whisper>=1.2.1
+kokoro-onnx>=0.6.1
+elevenlabs>=2.75           # hearing in the cloud: Scribe v2 (stt.provider: elevenlabs); Whisper above is the fallback
+python-dotenv>=1.2         # loads ELEVENLABS_API_KEY from .env (written by the ElevenLabs CLI; never in code)
+livekit>=1.2               # only for its build of WebRTC's audio processing: the browser's mic clean-up (audio.clean)
+
+# --- "Hey Mary" wake-word training only (exports the classifier; no PyTorch) ---
+onnx>=1.16
+
+# --- Dev ---
+pytest>=8

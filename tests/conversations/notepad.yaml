@@ -1,0 +1,7 @@
+name: Two steps in one sentence
+turns:
+  - user: "Open notepad and type hello."
+    expect: {tools: [open_app, keyboard]}
+    results:
+      open_app: {text: "Launched Notepad. Its window is ready.", say: "Opening Notepad."}
+      keyboard: {text: "Typed 5 characters into 'Untitled - Notepad'.", say: "Typed it."}

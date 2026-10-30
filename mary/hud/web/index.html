@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>MARY HUD</title>
+<link rel="stylesheet" href="hud.css">
+</head>
+<body>
+<div id="hud" class="hidden state-idle">
+  <div class="reactor">
+    <div class="ring r-outer"></div>
+    <div class="ring r-deep"></div>
+    <div class="ring r-dash"></div>
+    <div class="ring r-arcs"></div>
+    <div class="ring r-ticks"></div>
+    <div class="ring r-inner"></div>
+    <canvas id="wave" width="300" height="300"></canvas>
+    <div class="core"></div>
+    <div class="label" id="label">MARY</div>
+  </div>
+  <div class="panel">
+    <div class="you" id="you"></div>
+    <div class="reply" id="reply"></div>
+    <div class="log" id="log"></div>
+  </div>
+  <div class="scan"></div>
+</div>
+<script src="hud.js"></script>
+</body>
+</html>

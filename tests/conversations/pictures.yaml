@@ -1,0 +1,13 @@
+# From the 26 Oct transcript: split into three pieces, each web-searched "pictures".
+name: Open a picture
+turns:
+  - user: "Can you open any picture for me? I want to see, go to pictures and see if you could open any picture for me."
+    expect: {avoid: [web, take_screenshot]}
+    results:
+      find_files: |-
+        3 image file(s) in Pictures, newest first:
+        1. IMG_2041.jpg (Pictures, yesterday)
+        2. IMG_2038.jpg (Pictures, 4 days ago)
+        3. Screenshot 2026-10-20.png (Pictures, last week)
+        Newest first; use the number as file_action path.
+      file_action: {text: "Opened C:\\Users\\sam\\Pictures\\IMG_2041.jpg.", say: "Opening IMG_2041.jpg."}

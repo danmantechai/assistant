@@ -1,0 +1,7 @@
+# From the 26 Oct transcript: the read failed and she then searched files "for a clue". No chat contents here.
+name: WhatsApp that can't be read
+turns:
+  - user: "WhatsApp."
+    expect: {tools: [check_messages], avoid: [find_files, web]}
+    results:
+      check_messages: {ok: false, text: "WhatsApp Web is open but I couldn't read the chat list."}

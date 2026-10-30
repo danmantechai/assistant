@@ -1,0 +1,324 @@
+# MARY's default settings: they ship with MARY and explain every option. Don't edit them for yourself:
+# put your own changes in user/config.yaml (private, never published), which is merged over this file.
+# Restart MARY after editing.
+# Paths may use {Desktop}, {Documents}, {Downloads}, {Pictures} (resolved via Windows
+# known folders, so OneDrive-redirected folders work) and {project} (this folder).
+# Measurements quoted below were taken on the author's laptop (Ryzen 5 PRO 4650U, 16 GB, no GPU).
+
+llm:
+  host: http://127.0.0.1:11434
+  # Qwen3.5 2B (tools + thinking on/off per request). Measured with `python -m mary.llm.bench` (plugged in),
+  # against qwen3:4b-q4_K_M: 10.5 vs 3.6 tokens/s, follow-up requests 4-7 s vs 6-14 s, cold start 37 vs 85 s,
+  # RAM 2.2 vs 3.6 GB. The 4B follows instructions better but is several times slower.
+  model: qwen3.5:2b-q4_K_M
+  keep_alive: -1            # keep the model loaded while MARY runs
+  # Free the model's RAM (~2.2 GB for the 2B) when you quit MARY's voice mode. The next start then loads it
+  # again (~40 s). false = keep it loaded for a fast restart.
+  unload_on_quit: true
+  # Context window; changing it reloads the model. The tool prompt alone is ~3.5k tokens, and thinking needs room
+  # on top, so 8192. (With qwen3.5:2b this costs only ~25 MB over 6144; models that keep a cache for every
+  # token, like qwen3:4b, need a few hundred MB more.)
+  num_ctx: 8192
+  num_thread: 6             # your CPU's physical cores (6 on a Ryzen 5)
+  max_iterations: 8         # tool-call rounds per request
+  history_turns: 3          # after trimming, keep the last N exchanges as conversation memory
+  history_max_tokens: 2200  # trim only when remembered history grows past this (prompt + this < num_ctx)
+  history_tool_chars: 160   # tool results are shortened to this when remembered
+  history_reset_minutes: 15 # forget the conversation after this much idle time
+  tool_result_chars: 1500   # truncate tool output fed back to the model
+  # Think before every answer (she reasons, then acts or replies): better judgement, but much slower on a CPU,
+  # where the model writes ~5 tokens/s and a thought is often 100-400 tokens. false = think only when asked
+  # (think_triggers below), or when the model itself decides a request needs it.
+  think_by_default: false
+  think_triggers: ["think about this", "think carefully", "think hard", "think it through", "take your time"]
+  # num_predict caps output tokens. Temperatures are lower than Qwen's defaults (0.7 / 0.6): measured with
+  # qwen3.5:2b on repeated sums and reasoning, 0.2 / 0.3 got 15/18 right against 11/18 at the defaults.
+  sampling:
+    fast:     {temperature: 0.2, top_p: 0.8,  top_k: 20, num_predict: 512}
+    thinking: {temperature: 0.3, top_p: 0.95, top_k: 20, num_predict: 2048}
+  # Used only when MARY has to start `ollama serve` itself (Ollama not already running).
+  # Measured on the Ryzen 5 PRO 4650U: a q8_0 KV cache saves ~0.3 GB but makes prompt processing
+  # ~1.8x slower on CPU, and the Vulkan iGPU was no faster than the CPU, so: f16 KV, CPU only.
+  server_env:
+    OLLAMA_NUM_PARALLEL: "1"        # one KV cache instead of several
+    OLLAMA_FLASH_ATTENTION: "1"
+    OLLAMA_KV_CACHE_TYPE: f16
+
+# The brain socket (mary/brain/): which language model is MARY's brain. Ollama's settings are in llm: above.
+brain:
+  provider: ollama
+  # today = the router handles simple commands and passes the rest to the model with its guess (as before);
+  # new = a few instant commands as reflexes, everything else to the model whole, answered in her own words.
+  mode: new
+
+# Skill bricks (mary/skills/): one ability each. Remove a name to switch that ability off; to add one, copy
+# mary/skills/_template.py and add its name here. Restart MARY after editing.
+skills:
+  - apps            # open and close apps
+  - windows         # minimise, maximise, snap, switch
+  - sound_screen    # volume, mute, brightness, lock (instant)
+  - media           # pause, resume, skip (instant)
+  - pc_status       # battery, CPU, memory, disk
+  - power           # shut down, restart, sleep (always asks)
+  - web             # websites and searches
+  - files           # find, open, move, recycle files
+  - keyboard        # type text, press keys
+  - screenshot
+  - notes
+  - timers
+  - powershell      # commands (always shows them and asks)
+  - read_screen     # read a window or page
+  - music           # play on Spotify
+  - messages        # WhatsApp chat list
+  - weather
+  - screen_control  # click, type into boxes, scroll in any app
+  - memory          # remember things about you
+  - clock           # the time and date (instant)
+
+audio:
+  input_device: null        # null = Windows default microphone; or a name/number from `python -m mary.voices --devices`
+  output_device: null       # null = default speakers
+  chime: true               # soft "I'm listening" sound (it's kept out of the recording)
+  # The clean-up a browser does to the mic (WebRTC, as in Chrome): noise suppression, a low-rumble filter and
+  # automatic volume, on your request as it's recorded (~7 ms of CPU per second). Measured on real recordings
+  # in a noisy room: as good as the old noise filter, slightly better (26 vs 25 of 41 exact), so that filter
+  # is skipped. It can turn a loud mic down, but sound that already distorted in the mic stays distorted: if the
+  # console warns that your mic is too loud, lower it to ~70% (Settings › System › Sound › Input › Volume).
+  clean: {enabled: true, noise_suppression: true, auto_volume: true}
+
+vad:
+  threshold: 0.5            # Silero speech probability
+  preroll_ms: 300           # audio kept from before speech starts, so first syllables aren't cut
+  # The pause that ends a request grows the longer you talk: 1.5 s after a short command ("what time
+  # is it", under ~1.2 s of speech), rising smoothly to 5 s once you've spoken 2.5 s or more.
+  end_silence_ms: 1500
+  long_end_silence_ms: 5000
+  short_until_s: 1.2
+  long_after_s: 2.5
+  # Whisper starts on what you've said once a pause reaches this, so the transcript is usually ready
+  # when the pause ends the request. Speaking again just discards that run. 0 = off.
+  speculate_after_ms: 500
+  max_utterance_s: 90
+  no_speech_timeout_s: 10   # summoned but nothing said: give up after this long
+  followup_s: 8             # after answering, keep listening this long for a follow-up (0 = off)
+  # Also: HOLD the hotkey to talk for as long as you like, or tap it again to end recording now.
+
+stt:
+  # local = the Whisper below, on this PC only (free, private). elevenlabs = Scribe in the cloud: faster and
+  # more accurate, but what you say after the wake word goes to ElevenLabs and uses your plan's credits. To
+  # set it up, run `npx -y @elevenlabs/cli@latest onboard init` in this folder (it puts your key in .env), then
+  # set provider: elevenlabs in user/config.yaml. The local Whisper stays the fallback: no internet, no answer
+  # within timeout_s, or no key.
+  provider: local
+  elevenlabs:
+    # Live hearing, as on the dashboard (which uses scribe_v3_live): your request streams while you speak and
+    # the text is ready a moment after you stop. null = send the whole recording once you've finished (model).
+    live_model: scribe_v3_live
+    filter_background: true # live: ignore background talk and noise in the room
+    model: scribe_v2        # whole recordings: the fallback when live hearing fails
+    timeout_s: 4            # no answer by then: the next ear hears it instead (batch Scribe, then local Whisper)
+    retry_after_s: 15       # after a failure, only the local Whisper for this long (offline = one wait, not many)
+    # Measured on real recordings (2026-10-29): the noise filter made no difference to Scribe, so it gets them
+    # as they are. Correct transcripts scored -0.46 or better, and the 5 below -0.9 were all wrong.
+    denoise: false
+    min_confidence: -0.9    # mean word log-probability below this = "unsure": she asks you to say it again
+  # Names you use that it gets wrong (your wake phrase, apps, places, people). They go to both ears (Scribe as
+  # key terms, Whisper in its prompt). Adding the wake phrase took Scribe from 7 to 22 of 22 takes of it.
+  words: ["Notepad", "WhatsApp", "Spotify"]
+  model: small.en           # faster-whisper; base.en is ~2.7x faster and a bit less accurate
+  compute_type: int8
+  cpu_threads: 6
+  beam_size: 5              # measured: costs no extra time here (the encoder dominates), more accurate
+  # Context that biases spelling toward MARY's words ("Notepad", not "notes part"). Tested: unlike
+  # hotwords, it doesn't make Whisper invent words in silence.
+  prompt: "Hey Mary, open Notepad. Play Spotify. Check WhatsApp. Type this text."
+  # Put your installed apps' names in front of that prompt, so Whisper spells them ("Claude Code", not "plot
+  # code"). Whisper keeps only 223 tokens of prompt: apps with a window open always go in, then the rest,
+  # shortest names first, until it's full (about 70-100 of them).
+  app_names: true
+  # Transcripts Whisper is unsure of (mean token log-probability below this) are not acted on:
+  # MARY asks you to say it again. Lower = more permissive.
+  min_confidence: -0.9
+  # Background-noise filter before Whisper (0 = off). 2.5 was best on a recording in a noisy room.
+  denoise_strength: 2.5
+
+tts:
+  # kokoro = the local voice below (free, private). elevenlabs = a voice from your ElevenLabs account, e.g. one
+  # you made: everything she says goes to ElevenLabs and uses your plan's credits (about half a credit per
+  # character with eleven_v4_turbo). Kokoro stays the fallback: no internet, too slow, or the credits run out.
+  provider: kokoro
+  elevenlabs:
+    voice_id: ""                     # the voice's ID, from your ElevenLabs voice library
+    model: eleven_v4_turbo           # half the credits of eleven_v4; eleven_v4 = best quality
+    timeout_s: 6                     # a sentence not back by then: Kokoro says it
+    retry_after_s: 30                # after a failure, Kokoro for this long
+  # Full-precision model: on the Ryzen 5 PRO 4650U it synthesises 2x faster than real time, while the
+  # int8 file is 3x *slower* than real time (quantised ONNX ops are poorly optimised on this CPU).
+  model: kokoro/kokoro-v1.0.onnx       # under data/models
+  voices: kokoro/voices-v1.0.bin
+  threads: 6
+  voice: af_heart           # warm, calm female voice; hear the others with: python -m mary.voices
+  speed: 1.0
+  volume: 1.0               # 0..1, relative to the system volume
+
+wakeword:
+  enabled: false           # `train --enable` turns it on once a phrase passes on your voice
+  model: "{project}/data/models/wakeword/hey_mary.onnx"
+  # More phrases, each its own model (train: python -m mary.wakeword_training.train --phrase mom). Every
+  # trained phrase, this one included, is only used once training has passed it on your voice.
+  also: []
+  # To test the wake-word plumbing before "Hey Mary" exists, set enabled: true and model: hey_jarvis
+  threshold: auto           # auto = the threshold training picked (hey_mary.json); or a number like 0.6
+  cooldown_s: 2
+  # Second opinion: each detection is checked by this Whisper model (~1 s) before MARY answers, so the
+  # model's false wake-ups (17/h for "Hey Mom") are dropped quietly. false = answer every detection.
+  verify: base.en
+  # What she says when the wake word wakes her (the hotkey keeps the chime): one at random, never the same
+  # twice in a row. Wait for it, then speak. Kokoro spells "Mm-hmm" out as letters, so sounds like that are
+  # written as the text to show, then the sounds to say between slashes. Empty list = the chime.
+  replies:
+    - "Yes?"
+    - "I'm here."
+    - "Mm-hmm? /mˈhm?/"
+    - "I'm listening."
+  morning_replies: ["Morning!"]   # also in the mix before noon
+
+hud:
+  position: bottom-right    # bottom-right | center
+  width: 420                # logical pixels (Windows display scaling is applied on top)
+  height: 560
+  margin: 20
+  hide_after_s: 6           # fade out this long after MARY finishes
+
+hotkey:
+  combo: ctrl+space         # global; while MARY runs, other apps no longer receive this combination
+  focus_console: true       # text mode: the hotkey also brings MARY's terminal forward so you can type
+
+router:
+  enabled: true
+  intents_file: "{project}/intents.yaml"
+  model: BAAI/bge-small-en-v1.5   # fastembed (ONNX), ~9 ms per request on this CPU
+  threads: 2
+  direct_score: 0.82        # best intent similarity needed to skip the LLM...
+  direct_margin: 0.05       # ...and lead over the best intent of a different group
+  hint_score: 0.65          # 0.65-0.82: the LLM gets the router's guess as a hint; below: plain LLM
+  hint_sure_score: 0.72     # below this, a guess is passed on only if its slots fit the words ("Yes." scored
+                            # 0.66 for media; the hint "maybe media" was just noise)
+
+apps:
+  match_cutoff: 80          # rapidfuzz score (0-100) needed to accept an app match
+  ambiguity_margin: 6       # top-2 different apps closer than this = ambiguous
+  # Spoken name -> Start Menu app name, or an executable/command to run directly.
+  aliases:
+    vs code: Visual Studio Code
+    vscode: Visual Studio Code
+    code: Visual Studio Code
+    browser: "{default_browser}"    # resolved from Windows' https handler
+    web browser: "{default_browser}"
+    internet: "{default_browser}"
+    edge: Microsoft Edge
+    explorer: File Explorer
+    file explorer: File Explorer
+    files: File Explorer
+    terminal: Terminal
+    task manager: taskmgr.exe
+    command prompt: cmd.exe
+    cmd: cmd.exe
+    powershell: powershell.exe
+    control panel: control.exe
+    paint: mspaint.exe
+  # Start Menu entries matching this are never launched by name.
+  exclude_pattern: "(?i)\\b(uninstall|uninstaller|readme|read me|release notes|license|changelog|documentation|manual)\\b"
+
+weather:
+  # Where check_weather looks. Empty = the weather site guesses from your internet connection (it names your
+  # region). Or a city, e.g. Lisbon.
+  place: ""
+
+web:
+  search_url: "https://www.google.com/search?q={query}"
+  # "search YouTube for …" / "find … on YouTube" searches the site itself, so its results can be clicked.
+  search_sites:
+    youtube: "https://www.youtube.com/results?search_query={query}"
+    wikipedia: "https://en.wikipedia.org/w/index.php?search={query}"
+    amazon: "https://www.amazon.com/s?k={query}"
+  sites:                    # spoken site name -> URL
+    youtube: https://www.youtube.com
+    gmail: https://mail.google.com
+    google: https://www.google.com
+    github: https://github.com
+    reddit: https://www.reddit.com
+    netflix: https://www.netflix.com
+    wikipedia: https://en.wikipedia.org
+    amazon: https://www.amazon.com
+    maps: https://maps.google.com
+    google maps: https://maps.google.com
+    outlook: https://outlook.live.com
+    whatsapp: https://web.whatsapp.com
+    chatgpt: https://chatgpt.com
+
+paths:
+  screenshots: "{Pictures}/MARY"
+  notes: "{Documents}/MARY Notes"
+  search_folders: ["{Desktop}", "{Documents}", "{Downloads}"]
+  data: "{project}/data"
+  logs: "{project}/logs"
+
+files:
+  max_results: 10           # remembered for "open the third one"
+  show_results: 5           # listed to the LLM (each line costs prompt-processing time)
+  walk_time_budget_s: 3     # fallback folder scan stops after this long
+  skip_dirs: [node_modules, .git, .venv, venv, __pycache__, AppData, "$RECYCLE.BIN"]
+
+safety:
+  confirm_phrase: "Shall I go ahead?"
+  long_text_chars: 200      # typing more than this needs confirmation
+  unsaved_title_markers: ["*", "●", "•"]
+  # Closing these apps always asks first (they may hold unsaved work; browsers close every tab).
+  editor_processes: [notepad.exe, notepad++.exe, winword.exe, excel.exe, powerpnt.exe, onenote.exe,
+                     code.exe, devenv.exe, pycharm64.exe, idea64.exe, photoshop.exe, illustrator.exe,
+                     acrobat.exe, obsidian.exe, sublime_text.exe, gimp-2.10.exe, blender.exe,
+                     msedge.exe, chrome.exe, firefox.exe, brave.exe, opera.exe]
+  powershell_timeout_s: 30
+  # Regexes (case-insensitive). A matching PowerShell command is refused even if you confirm.
+  powershell_blocklist:
+    - '\bFormat-Volume\b'
+    - '\bformat(\.com|\.exe)?\s+[a-z]:'
+    - '\b(Clear|Initialize)-Disk\b'
+    - '\b(Remove|Set|Resize)-Partition\b'
+    - '\bdiskpart\b'
+    - '\bbcdedit\b'
+    - '\breg(\.exe)?\s+(add|delete|import|load|unload|restore|copy)\b'
+    - '\b(Set|New|Remove|Rename|Clear|Move|Copy)-ItemProperty\b'
+    - '\b(New|Set|Remove|Rename|Move|Copy|Clear)-Item\b.*\b(HKLM|HKCU|HKCR|HKU|HKCC|Registry)::?'
+    - '\[Microsoft\.Win32\.Registry'
+    - '\b(Set|Add|Remove)-MpPreference\b'
+    - '\bnetsh\b.*firewall'
+    - '\b(Set|Disable|Remove)-NetFirewall'
+    - '\b(Stop|Set)-Service\b.*\b(WinDefend|wscsvc|mpssvc|SecurityHealthService|Sense|WdNisSvc)\b'
+    - '\bsc(\.exe)?\s+(stop|delete|config)\b'
+    - '\bSet-ExecutionPolicy\b'
+    - '\b(vssadmin|wbadmin)\b.*\bdelete\b'
+    - '\bshadowcopy\b.*\bdelete\b'
+    - '\bcipher(\.exe)?\s+/w'
+    - '\b(takeown|icacls|cacls)\b'
+    - '\s-(e|ec|enc|encodedcommand)\s'
+    - '\b(iex|Invoke-Expression)\b'
+    - '(DownloadString|DownloadFile|Net\.WebClient|Start-BitsTransfer)'
+    - '-Verb\s+RunAs'
+    - '\b(Stop-Computer|Restart-Computer|shutdown(\.exe)?)\b'
+    - '\b(Remove-Item|rm|del|erase|rmdir|rd|ri)\b'
+    - '(::|\.)Delete\s*\('
+    - '\b(Clear-Content|Clear-RecycleBin)\b'
+    - '\b(Remove-AppxPackage|Uninstall-Package|Uninstall-Module)\b'
+    - '\b(New-LocalUser|Add-LocalGroupMember|Set-LocalUser)\b'
+    - '\bnet(\.exe)?\s+(user|localgroup)\b'
+    - '\b(Register-ScheduledTask|schtasks)\b'
+    - '\bDisable-ComputerRestore\b'
+
+timers:
+  alarm_beeps: 3
+
+logging:
+  level: INFO
+  debug: false              # same as --debug: print per-stage latency after each request

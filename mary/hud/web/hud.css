@@ -1,0 +1,110 @@
+/* MARY HUD: arc-reactor rings, glowing core, live waveform, text panel.
+   Everything animated uses transform/opacity (GPU-friendly). The page background is transparent:
+   the Qt window is per-pixel translucent, so only what's drawn here is visible. */
+
+:root {
+  --c: #39e6ff;        /* accent colour, set per state */
+  --c2: #9ff4ff;       /* lighter accent */
+  --spin: 16s;         /* one turn of the main ring */
+  --level: 0;          /* 0..1 audio level (mic or speech), drives the core */
+  --glass: rgba(3, 14, 22, 0.74);
+}
+
+html, body { margin: 0; height: 100%; background: transparent; overflow: hidden;
+             font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+             -webkit-user-select: none; user-select: none; cursor: default; }
+
+#hud { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
+       transition: opacity .35s ease, transform .35s cubic-bezier(.2, .8, .2, 1); }
+#hud.hidden { opacity: 0; transform: translateY(18px) scale(.97); }
+#hud.shown  { opacity: 1; transform: none; }
+
+/* ---- per-state colours and speeds ---- */
+.state-idle, .state-listening { --c: #39e6ff; --c2: #a8f6ff; --spin: 16s; }
+.state-thinking               { --c: #ffb340; --c2: #ffe0a8; --spin: 5s; }
+.state-deep_thinking          { --c: #ffb340; --c2: #ffe0a8; --spin: 3s; }
+.state-speaking               { --c: #c9f8ff; --c2: #ffffff; --spin: 10s; }
+.state-confirming             { --c: #ff8a2a; --c2: #ffc591; --spin: 9s; }
+.state-error                  { --c: #ff4545; --c2: #ffb0b0; --spin: 7s; }
+.state-error .reactor { animation: flash .18s ease 3; }
+
+/* ---- reactor ---- */
+.reactor { position: relative; width: 300px; height: 300px; margin-top: 6px; flex: none; }
+.ring { position: absolute; border-radius: 50%; inset: 0; pointer-events: none;
+        transition: opacity .4s ease, border-color .4s ease; will-change: transform; }
+
+.r-outer { inset: 8px; border: 1px solid color-mix(in srgb, var(--c) 45%, transparent);
+           box-shadow: 0 0 18px color-mix(in srgb, var(--c) 35%, transparent),
+                       inset 0 0 18px color-mix(in srgb, var(--c) 20%, transparent); }
+.r-deep  { inset: -2px; opacity: 0; border: 2px dotted var(--c);
+           animation: spin calc(var(--spin) * 2.2) linear infinite reverse; }
+.state-deep_thinking .r-deep { opacity: .9; }
+.r-dash  { inset: 22px; border: 2px dashed color-mix(in srgb, var(--c) 80%, transparent);
+           animation: spin var(--spin) linear infinite; }
+.r-arcs  { inset: 40px;
+           background: conic-gradient(from 0deg, var(--c) 0 38deg, transparent 38deg 90deg,
+                                      var(--c) 90deg 128deg, transparent 128deg 180deg,
+                                      var(--c) 180deg 218deg, transparent 218deg 270deg,
+                                      var(--c) 270deg 308deg, transparent 308deg 360deg);
+           -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 4px));
+                   mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 4px));
+           animation: spin calc(var(--spin) * .6) linear infinite reverse; }
+.r-ticks { inset: 56px;
+           background: repeating-conic-gradient(color-mix(in srgb, var(--c) 85%, transparent) 0 1.2deg,
+                                                transparent 1.2deg 7.5deg);
+           -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 9px), #000 calc(100% - 8px));
+                   mask: radial-gradient(farthest-side, transparent calc(100% - 9px), #000 calc(100% - 8px));
+           animation: spin calc(var(--spin) * 1.6) linear infinite; }
+.r-inner { inset: 88px; border: 1px solid color-mix(in srgb, var(--c2) 70%, transparent);
+           box-shadow: 0 0 22px color-mix(in srgb, var(--c) 60%, transparent); }
+
+#wave { position: absolute; inset: 0; width: 300px; height: 300px; }
+
+.core { position: absolute; left: 50%; top: 50%; width: 120px; height: 120px; margin: -60px 0 0 -60px;
+        border-radius: 50%;
+        /* The glow is part of the gradient (no filter): the core rescales ~30 times a second, and a
+           filter would have to be recomputed on every frame. JS sets the scale from the audio level. */
+        background: radial-gradient(circle, #ffffff 0%, var(--c2) 18%, var(--c) 38%,
+                                    color-mix(in srgb, var(--c) 45%, transparent) 52%,
+                                    color-mix(in srgb, var(--c) 14%, transparent) 68%, transparent 74%);
+        transform: scale(.9); will-change: transform; }
+.state-thinking .core, .state-deep_thinking .core { animation: breathe 1.4s ease-in-out infinite; }
+
+.label { position: absolute; left: 0; right: 0; bottom: 6px; text-align: center; font-size: 11px;
+         letter-spacing: .55em; color: color-mix(in srgb, var(--c2) 80%, transparent);
+         text-shadow: 0 0 8px var(--c); padding-left: .55em; }
+
+/* ---- text panel ---- */
+.panel { width: 392px; margin-top: 6px; padding: 12px 16px 12px; box-sizing: border-box;
+         background: var(--glass); border-radius: 14px;
+         border: 1px solid color-mix(in srgb, var(--c) 45%, transparent);
+         box-shadow: 0 0 24px color-mix(in srgb, var(--c) 22%, transparent),
+                     inset 0 0 18px color-mix(in srgb, var(--c) 10%, transparent);
+         transition: border-color .4s ease, box-shadow .4s ease; }
+.panel:empty, .panel.blank { display: none; }
+.you { color: #9fb6c2; font-size: 13px; line-height: 1.35; min-height: 0; }
+.you:not(:empty)::before { content: "YOU  "; letter-spacing: .2em; font-size: 10px;
+                           color: color-mix(in srgb, var(--c) 80%, transparent); }
+.reply { color: #eefcff; font-size: 16px; line-height: 1.42; margin-top: 6px;
+         text-shadow: 0 0 10px color-mix(in srgb, var(--c) 35%, transparent); white-space: pre-wrap; }
+.reply.typing::after { content: "▍"; color: var(--c); animation: blink 1s steps(1) infinite; margin-left: 1px; }
+.log { margin-top: 8px; font: 12px/1.45 "Cascadia Mono", Consolas, monospace; color: #7fa4b3; }
+.log div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; animation: fadein .25s ease; }
+.log .ok { color: #6fe3a0; }
+.log .err { color: #ff8080; }
+
+/* ---- entrance scan line ---- */
+.scan { position: absolute; left: 6%; right: 6%; height: 2px; top: -4%; opacity: 0; pointer-events: none;
+        background: linear-gradient(90deg, transparent, var(--c2), transparent);
+        box-shadow: 0 0 14px var(--c); }
+#hud.scanning .scan { animation: scan .7s ease-out 1; }
+
+@keyframes spin    { to { transform: rotate(360deg); } }
+@keyframes breathe { 50% { transform: scale(.8); } }
+@keyframes blink   { 50% { opacity: 0; } }
+@keyframes fadein  { from { opacity: 0; transform: translateX(-6px); } }
+@keyframes flash   { 50% { filter: brightness(2.2) drop-shadow(0 0 22px #ff4545); } }
+@keyframes scan    { 0% { top: -2%; opacity: 0; } 15% { opacity: 1; } 100% { top: 101%; opacity: 0; } }
+
+/* When the window is hidden, nothing should animate. */
+#hud.asleep * { animation-play-state: paused !important; }

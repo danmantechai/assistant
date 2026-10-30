@@ -1,0 +1,127 @@
+# Router calibration cases: python -m mary.calibrate
+# expect: the intent the router should run directly, "llm" for requests it must NOT run itself,
+# or a list (one per clause) for compound requests, which are split before routing.
+# Add your own real phrasings here, run the calibration, and tune router.* in config.yaml.
+
+cases:
+  # ---- should run directly (paraphrases that are not copies of intents.yaml examples)
+  - {text: "could you open notepad please", expect: open_app}
+  - {text: "start up the calculator", expect: open_app}
+  - {text: "launch microsoft edge", expect: open_app}
+  - {text: "open settings", expect: open_app}
+  - {text: "get spotify running", expect: open_app}
+  - {text: "please quit spotify", expect: close_app}
+  - {text: "close the calculator app", expect: close_app}
+  - {text: "minimize this", expect: window_control}
+  - {text: "snap spotify to the right", expect: window_control}
+  - {text: "maximise the window", expect: window_control}
+  - {text: "volume down", expect: volume}
+  - {text: "turn it down a little", expect: volume}
+  - {text: "set the volume to 40 percent", expect: volume}
+  - {text: "louder", expect: volume}
+  - {text: "mute the sound", expect: volume}
+  - {text: "turn the volume all the way up", expect: volume}
+  - {text: "brighter please", expect: brightness}
+  - {text: "dim the screen a bit", expect: brightness}
+  - {text: "set brightness to 60", expect: brightness}
+  - {text: "pause the song", expect: media}
+  - {text: "skip to the next track", expect: media}
+  - {text: "go back to the previous song", expect: media}
+  - {text: "resume the music", expect: media}
+  - {text: "play some gospel", expect: play_music}
+  - {text: "put on Jim Reeves", expect: play_music}
+  - {text: "play some music", expect: play_music}
+  - {text: "I want to hear country music", expect: play_music}
+  - {text: "play me some country side music", expect: play_music}
+  - {text: "do I have messages", expect: check_messages}
+  - {text: "any new whatsapp messages", expect: check_messages}
+  - {text: "check whatsapp for me", expect: check_messages}
+  - {text: "has anyone messaged me", expect: check_messages}
+  - {text: "lock the pc", expect: lock_pc}
+  - {text: "lock my computer now", expect: lock_pc}
+  - {text: "what's the time now", expect: time_date}
+  - {text: "what's the date today", expect: time_date}
+  - {text: "how's my battery doing", expect: system_status}
+  - {text: "how much memory is free", expect: system_status}
+  - {text: "is the laptop plugged in", expect: system_status}
+  - {text: "open youtube", expect: open_website}
+  - {text: "go to github", expect: open_website}
+  - {text: "open reddit.com", expect: open_website}
+  - {text: "search for jollof rice recipe", expect: web_search}
+  - {text: "google the weather in paris", expect: web_search}
+  - {text: "look up who won the champions league", expect: web_search}
+  - {text: "take a screen shot", expect: take_screenshot}
+  - {text: "capture my screen", expect: take_screenshot}
+  - {text: "set a timer for ten minutes", expect: timer}
+  - {text: "timer for 45 seconds", expect: timer}
+  - {text: "remind me in an hour", expect: timer}
+  - {text: "find the PDF I downloaded this week", expect: find_files}
+  - {text: "where's my CV", expect: find_files}
+  - {text: "find the excel file I saved yesterday", expect: find_files}
+  - {text: "look for photos on my desktop", expect: find_files}
+  - {text: "Can you find me a list of files in my downloads folder?", expect: find_files}
+  - {text: "can you give me a list of images that I have downloaded in my download folder", expect: find_files}
+  - {text: "check if I have any new file downloaded today", expect: find_files}
+  - {text: "check my download folder to see if I have any pdf file", expect: find_files}
+  - {text: "what's in my downloads", expect: find_files}
+  - {text: "what did I download yesterday", expect: find_files}
+  - {text: "any videos on my desktop", expect: find_files}
+  - {text: "open my downloads folder", expect: open_folder}
+  - {text: "I mean what is the current weather", expect: weather}
+  - {text: "what's the weather tomorrow", expect: weather}
+  - {text: "how hot is it in Paris right now", expect: weather}
+  - {text: "is it raining outside", expect: weather}
+  - {text: "go to my documents", expect: open_folder}
+
+  - {text: "remember that I prefer Microsoft Edge", expect: remember}
+  - {text: "please remember my brother is called Yaw", expect: remember}
+  - {text: "my name is Sam", expect: my_name}
+  - {text: "call me Ama", expect: my_name}
+  - {text: "remember that I use Microsoft Edge for browsing", expect: remember}
+  - {text: "keep in mind that I like country music", expect: remember}
+  - {text: "forget that I prefer Edge", expect: forget}
+  - {text: "please forget what I said about my car", expect: forget}
+
+  # ---- must NOT run directly (no tool, needs reasoning, negated, refers back, or risky)
+  - {text: "write me a poem about the sea", expect: llm}
+  - {text: "why is my computer so slow", expect: llm}
+  - {text: "don't open spotify", expect: llm}
+  - {text: "open it", expect: llm}
+  - {text: "do that again", expect: llm}
+  - {text: "close all my windows", expect: llm}
+  - {text: "what did mum say on whatsapp", expect: llm}
+  - {text: "what time is it in tokyo", expect: llm}
+  - {text: "tell me a joke", expect: llm}
+  - {text: "how do I take a screenshot", expect: llm}
+  - {text: "should I restart my computer", expect: llm}
+  - {text: "translate hello into french", expect: llm}
+  - {text: "what's 15 times 23", expect: llm}
+  - {text: "find the biggest file in my downloads", expect: llm}
+  - {text: "create a note called groceries", expect: llm}
+  - {text: "type hello world", expect: type_text}
+  - {text: "write the following text and it's Imano is a good boy", expect: type_text}
+  - {text: "write the following text in it", expect: type_text}
+  - {text: "open notes part", expect: open_app}
+  - {text: "type my password", expect: llm}
+  - {text: "write me an email to my boss", expect: llm}
+  - {text: "write a story about a dragon", expect: llm}
+  - {text: "what is on my screen", expect: llm}
+  - {text: "open the other one", expect: llm}
+  - {text: "turn off the wifi", expect: llm}
+  - {text: "shut down the computer", expect: llm}
+  - {text: "open the file I was working on yesterday", expect: llm}
+  - {text: "never mind", expect: llm}
+  - {text: "do you remember what I like?", expect: llm}
+  - {text: "call me a taxi", expect: llm}
+  - {text: "remember to call mum at five", expect: llm}
+  - {text: "forget it", expect: llm}
+  - {text: "forget about it", expect: llm}
+  - {text: "what's my name", expect: llm}
+  - {text: "what did I do today", expect: llm}
+  - {text: "open the video player", expect: llm}
+
+  # ---- compound: split into clauses, each routed on its own
+  - {text: "open notepad and set a timer for 5 minutes", expect: [open_app, timer]}
+  - {text: "open my browser and open whatsapp web and see if i have any message",
+     expect: [open_app, open_website, check_messages]}
+  - {text: "pause the music and lock the computer", expect: [media, lock_pc]}
