@@ -2,7 +2,8 @@
 [--model NAME ...] [--think on|off] [files]
 
 Each file in tests/conversations/ is a conversation: what the user said, what the tools should return, and what
-to expect. MARY runs for real (router, model, safety gate, replies) except that no tool does anything: each one
+to expect. A turn can say `day: 1` (a day passes before it: the memory's clock moves on), and a conversation can say
+`real: [memory]` to leave those tools unfaked: they then work on a scratch profile and a scratch memory, never yours. MARY runs for real (router, model, safety gate, replies) except that no tool does anything: each one
 returns the result scripted for that turn, or a plain default. The report, with both modes side by side, goes
 to logs/replay/. It uses the real language model, so a run takes a while (~15 s per model turn on this laptop),
 and MARY, if she's running, re-reads her conversation on her next request.
@@ -13,6 +14,7 @@ import argparse
 import re
 import statistics
 import sys
+import tempfile
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -106,7 +108,7 @@ def _default(name: str, args: dict) -> ToolResult:
 def _scripted(value) -> ToolResult:
     if isinstance(value, str):
         return ToolResult(True, value, say=value.splitlines()[0])
-    return ToolResult(bool(value.get("ok", True)), value["text"], say=value.get("say"))
+    return ToolResult(bool(value.get("ok", True)), value["text"], say=value.get("say"), status=value.get("status", ""))
 
 
 class Replay:
@@ -125,12 +127,27 @@ class Replay:
         self.out = Capture()
         self.front = FRONT
         core.write_jsonl = lambda *a, **k: None  # keep replays out of the real routing/latency logs
-        agent.live_context = lambda hint=None: ("<context>\n" + CONTEXT.format(now=datetime.now(), **self.front)
-                                                + (f"\nrouter guess: {hint}" if hint else "") + "\n</context>\n")
+        from mary import memory
+        from mary.memory import clock
+
+        agent.live_context = lambda hint=None, extra=(): (
+            "<context>\n" + CONTEXT.format(now=clock.now(), **self.front) + (f"\nrouter guess: {hint}" if hint else "")
+            + "".join(f"\n{line}" for line in extra) + "\n</context>\n")
+        memory.FOLDER = Path(tempfile.mkdtemp(prefix="mary-replay-memory-"))   # her real memory is never touched
+        self.cfg = cfg
         self.mary = Mary(cfg, self.out)
+        self.real: set[str] = set()
+        self.real_profile = self.mary.profile
+        if self.mary.memory is not None:
+            self.mary.memory.embedder.load()   # meaning search works as it does for her
+        # No desktop to watch: a "not yet" goes straight back to the model, as after a wait that ran out.
+        from mary.ready import Loop, StillDesk
+
+        self.mary.ctx.loop = Loop(StillDesk(), self.out, patient=False)
         self.turn: Turn | None = None
         self.results: dict = {}
         self.used: dict[str, int] = {}
+        self._real_fns = {t.name: t.fn for t in self.mary.tools.tools.values()}
         for tool in self.mary.tools.tools.values():  # no tool does anything; the safety gate still runs
             tool.fn = self._fake(tool.name)
         real_run = self.mary.tools.run
@@ -145,6 +162,8 @@ class Replay:
 
     def _fake(self, name: str):
         def fn(**args) -> ToolResult:
+            if name in self.real:
+                return self._real_fns[name](**args)
             if name == "escalate":
                 return ToolResult(True, "Escalated.")
             missing = self._unmatched_window(name, args)
@@ -174,6 +193,47 @@ class Replay:
     def warm_up(self) -> None:
         self.mary.warm_up()
 
+    def begin(self, conv: dict) -> None:
+        """A conversation starts: its front window, the tools it leaves real (with a scratch profile and an empty
+        scratch memory for them to work on), and the day it starts."""
+        from mary.memory import clock
+
+        self.front = conv.get("active_window") or FRONT
+        self.real = set(conv.get("real") or [])
+        clock.reset()
+        self._new_memory(scratch_profile=bool(self.real))
+
+    def end(self) -> None:
+        from mary.memory import clock
+
+        clock.reset()
+        self.real = set()
+        self._new_memory(scratch_profile=False)
+
+    def _new_memory(self, scratch_profile: bool) -> None:
+        """An empty memory (and with `scratch_profile` an empty profile) for the next conversation, so what one
+        conversation told her never reaches another."""
+        from mary import memory
+        from mary.memory.diary import Diary
+        from mary.profile import Profile
+
+        m = self.mary
+        profile = (Profile(Path(tempfile.mkdtemp(prefix="mary-replay-profile-")) / "profile.yaml")
+                   if scratch_profile else self.real_profile)
+        if m.memory is not None:
+            old = m.memory
+            memory.FOLDER = Path(tempfile.mkdtemp(prefix="mary-replay-memory-"))
+            m.memory = memory.open_store(self.cfg, embedder=old.embedder)
+            m.diary = Diary(m.memory)
+            m.memory.sync_core(profile.facts)
+            profile.listeners.append(lambda: m.memory.sync_core(profile.facts))
+            m.ctx.memory = m.agent.memory = m.memory
+            old.worker.stop()
+        m.profile = m.ctx.profile = m.agent.profile = profile
+        if scratch_profile:
+            profile.listeners.append(m.agent._profile_changed)
+        m.agent.pinned = m.agent._profile_messages()
+
     def reset(self) -> None:
         m = self.mary
         m.agent.reset()
@@ -186,6 +246,11 @@ class Replay:
     def run_turn(self, spec: dict) -> Turn:
         self.turn = turn = Turn(spec["user"], spec.get("expect") or {})
         self.results, self.used = spec.get("results") or {}, {}
+        if spec.get("day"):   # a day passes: the memory's clock moves, and the conversation she was having is over
+            from mary.memory import clock
+
+            clock.advance(days=spec["day"])
+            self.mary.agent.reset()
         self.out.spoken = []
         start = time.perf_counter()
         latency = self.mary.handle(spec["user"])
@@ -199,13 +264,22 @@ class Replay:
         if prefill:  # the pause before the next thing you'd say, which MARY uses to pre-read the conversation
             prefill.join(timeout=180)
         self.turn = None
-        turn.misses = judge(turn)
+        turn.misses = judge(turn, self.mary.agent.persona)
         return turn
 
 
-def judge(t: Turn) -> list[str]:
+_LEAK = re.compile(r"\b(?:the name in (?:your|his|her|my|their) note|my (?:system )?(?:instructions|prompt)|"
+                   r"<context>|from your memories|how you write)\b", re.I)
+
+
+def judge(t: Turn, persona=None) -> list[str]:
     """What went against the conversation's expectations (and the plain rules every turn keeps)."""
     e, misses = t.expect, []
+    said = [s for k, s in t.spoken if k in ("model", "fixed")]
+    if any(_LEAK.search(s) for s in said):
+        misses.append("repeated her instructions")
+    if persona is not None and persona.nicknames and any(persona.fix_address(s) != s for s in said):
+        misses.append("called the user by her own name")
     tried = {c.tool for c in t.calls}
     done = {c.tool for c in t.calls if c.ok}
     for tool in e.get("tools", []):
@@ -222,6 +296,13 @@ def judge(t: Turn) -> list[str]:
         misses.append(f"not instant ({t.seconds:.1f} s{', used the model' if t.used_model else ''})")
     if e.get("talk") and t.calls:
         misses.append("used a tool instead of talking")
+    heard = " ".join(said)
+    for pattern in e.get("mentions", []):   # a regular expression each: she has to have said it
+        if not re.search(pattern, heard, re.I):
+            misses.append(f"didn't say {pattern!r}")
+    for pattern in e.get("lacks", []):      # and these she must not have said
+        if re.search(pattern, heard, re.I):
+            misses.append(f"said {pattern!r}")
     if any(text == CLARIFY for _, text in t.spoken):
         misses.append("said \"didn't quite catch that\"")
     if t.markup or any(re.search(r"</?(?:tool_call|function|parameter)\b|<parameter=", s) for _, s in t.spoken):
@@ -303,13 +384,14 @@ def main() -> None:
             runs[label] = []
             for conv in conversations:
                 replay.reset()
-                replay.front = conv.get("active_window") or FRONT
+                replay.begin(conv)
                 turns = []
                 for spec in conv["turns"]:
                     turn = replay.run_turn(spec)
                     turns.append(turn)
                     print(f"[{label}] {conv['name']}: {turn.user[:60]!r} -> {turn.seconds:.1f} s"
                           + (f"  ✗ {'; '.join(turn.misses)}" if turn.misses else ""), flush=True)
+                replay.end()
                 runs[label].append((conv["name"], turns))
         if model:
             replay.mary.agent.brain.unload()  # one model in RAM at a time

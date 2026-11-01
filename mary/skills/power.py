@@ -76,7 +76,7 @@ def tools(ctx: ToolContext) -> list[Tool]:
     found = [
         Tool("power", "Shut down, restart, sleep, hibernate or sign out of the PC.",
              {"action": {"type": "string", "enum": POWER_ACTIONS}},
-             ["action"], power, tier=2, speaks_for_itself=True,
+             ["action"], power, tier=2, speaks_for_itself=True, watch=False,
              announce=lambda a: f"Power: {a.get('action', '')}…",
              confirm_text=lambda a: f"{a.get('action', 'shut down').replace('_', ' ')} the PC",
              new_tier=lambda a: 2 if a.get("action") == "sign_out" else 1,
@@ -84,5 +84,5 @@ def tools(ctx: ToolContext) -> list[Tool]:
     ]
     if new_mode:  # only the new mode counts down (the old one asks first, then shuts down in 5 s)
         found.append(Tool("cancel_power", "Cancel a shutdown or restart that is counting down.", {}, [],
-                          cancel_power, announce=lambda a: "Cancelling the shutdown…"))
+                          cancel_power, watch=False, announce=lambda a: "Cancelling the shutdown…"))
     return found

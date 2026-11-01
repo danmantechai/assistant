@@ -40,13 +40,36 @@ class Mary:
         self.apps = AppIndex(cfg)
         if self.apps.loaded_from_cache:
             self.apps.refresh_in_background()  # pick up newly installed apps
+        from mary import memory
         from mary.profile import Profile
 
         self.profile = Profile()
         self.mode = brain_mode(cfg)
-        self.ctx = ToolContext(cfg, self.apps, output, profile=self.profile)
+        self.memory = memory.open_store(cfg)   # the diary and what she has learned (None: switched off)
+        self.diary = None
+        if self.memory is not None:
+            from mary.memory.diary import Diary
+
+            self.diary = Diary(self.memory)
+            self.memory.sync_core(self.profile.facts)   # what you told her to remember is searchable too
+            self.profile.listeners.append(lambda: self.memory.sync_core(self.profile.facts))
+        self.ctx = ToolContext(cfg, self.apps, output, profile=self.profile, memory=self.memory)
         self.tools = ToolRegistry(self.ctx)
-        self.agent = Agent(cfg, self.tools, output, self.profile)
+        self.agent = Agent(cfg, self.tools, output, self.profile, self.memory)
+        self.consolidator = None
+        if self.memory is not None:
+            self._start_background_pass()
+        self._handling = 0                # requests being answered right now: the photo worker steps aside meanwhile
+        self.photos = self.ingest = None
+        if self.memory is not None:
+            from mary import photos
+            from mary.photos.ingest import Ingest
+
+            self.photos = photos.open_library(cfg, self.memory)
+            if self.photos is not None:
+                self.ingest = Ingest(self.photos, busy=lambda: self._handling > 0)
+        self._reply = ""                  # what she said to this request, for the diary
+        self._failed = False              # this request couldn't be answered (the model was offline, an error)
         from mary import skills
 
         self.reflexes = Reflexes(skills.reflexes(self.tools.bricks))
@@ -64,12 +87,42 @@ class Mary:
             self.router = Router(cfg, self.apps, self.ctx)
             self.router_load_s = time.perf_counter() - start
 
+    def _start_background_pass(self) -> None:
+        """The memory's background pass: it reads the diary and learns facts, only while nobody is using MARY or the PC
+        (and it does nothing at all unless memory.consolidate.enabled)."""
+        import atexit
+
+        from mary.memory.consolidate import Consolidator
+        from mary.memory.idle import input_idle_seconds, on_battery
+
+        def quiet() -> bool:
+            s = self.memory.setting
+            if time.monotonic() - self.agent.last_activity < s("consolidate.idle_minutes") * 60:
+                return False
+            if self.agent.warming.is_set() or self.agent.offline_reason:
+                return False
+            if s("consolidate.only_on_ac") and on_battery():
+                return False
+            idle = input_idle_seconds()
+            return idle is None or idle >= 60
+
+        self.consolidator = Consolidator(self.memory, self.agent.brain, quiet)
+        self.memory.worker.every(60, self.consolidator.tick)
+
+        def finish() -> None:   # the last lines written before she quit reach the files
+            try:
+                self.memory.flush()
+            except Exception:
+                pass
+
+        atexit.register(finish)
+
     def greeting(self) -> str:
-        """What MARY says when she's ready: by time of day, with your name if she knows it."""
+        """What MARY says when she's ready: the persona's greeting, by time of day, with your name if she knows it."""
         hour = time.localtime().tm_hour
         part = "Good morning" if hour < 12 else "Good afternoon" if hour < 17 else "Good evening"
-        name = self.profile.name
-        return f"{part}, {name}. I'm ready when you are." if name else f"{part}. MARY here, ready when you are."
+        her, name = self.agent.persona, self.profile.name
+        return (her.greeting if name else her.greeting_no_name).format(part=part, name=name)
 
     def warm_up(self) -> float | None:
         """Seconds the model took to load, or None if it's unavailable: MARY then starts in router-only
@@ -80,10 +133,24 @@ class Mary:
             self.agent.go_offline(str(e))
             return None
 
+    def start_photos(self) -> None:
+        """Begin looking after the folders you added (nothing is read until you add one)."""
+        if self.ingest is not None:
+            self.ingest.start()
+
     def handle(self, text: str, think: bool = False, prefill: bool = True) -> Latency:
+        self._handling += 1
+        try:
+            return self._handle(text, think, prefill)
+        finally:
+            self._handling -= 1
+
+    def _handle(self, text: str, think: bool = False, prefill: bool = True) -> Latency:
         """prefill=False: the caller starts the background cache prefill itself, later (voice mode
         does it after MARY has finished speaking, so the two don't fight over the CPU)."""
         latency = Latency(text)
+        self.ctx.did.clear()
+        self._reply, self._failed = "", False
         self.output.user_text(text)
         self.end_conversation = False
         if self.awaiting and time.monotonic() > self.awaiting_until:
@@ -139,6 +206,7 @@ class Mary:
                 else:
                     reply = self.agent.run(clause, latency=latency, think=think,
                                            hint=decision.hint if decision else None)
+                    self._reply = reply
                     question = conversation.offer_in(reply)
                     self.offer = (question, time.monotonic()) if question else None
                     self.asked = reply.rstrip().endswith("?")
@@ -146,18 +214,32 @@ class Mary:
             self.output.reply_end()
             self.output.tool_log("✗ Stopped")
         except LLMOffline as e:
+            self._failed = True
             log.warning("request needed the LLM, which is offline: %s", e)
             self.output.say(OFFLINE_REPLY)
         except Exception as e:
+            self._failed = True
             log.exception("request failed: %s", text)
             self.output.state(ERROR)
             self.output.say(f"Sorry, something went wrong: {e}")
         finally:
             self.output.state(IDLE)
+        self._write_diary(text)
         write_jsonl("latency", latency.as_dict())
         if prefill:
             self.agent.prefill_in_background()  # so the next LLM request doesn't re-read this one
         return latency
+
+    def _write_diary(self, request: str) -> None:
+        """One line for what just happened, after she has answered (the reply never waits for it)."""
+        if self.diary is None or self._failed or not self.memory.setting("diary.enabled"):
+            return
+        try:
+            from mary.memory.diary import Did
+
+            self.diary.record(request, [Did(*d) for d in self.ctx.did], self._reply)
+        except Exception:
+            log.exception("couldn't write the diary line")
 
     def _new_turn(self, text: str, latency: Latency, think: bool, plain: bool) -> None:
         """New mode: a reflex if the whole request is a plain instant command, else the brain, whole."""
@@ -166,6 +248,7 @@ class Mary:
             self._run_reflex(text, *hit, latency)
             return
         reply = self.agent.run(text, latency=latency, think=think)
+        self._reply = reply
         question = conversation.offer_in(reply)
         self.offer = (question, time.monotonic()) if question else None
         self.asked = reply.rstrip().endswith("?")
@@ -183,6 +266,7 @@ class Mary:
             reply = reflex.answer(text)
         latency.mark("reply")
         self.output.say(reply)
+        self._reply = reply
         self.agent.remember_direct(text, reflex.tool, args, result_text, reply)  # "turn it back up" works
 
     def _just_browsed(self) -> bool:
@@ -195,18 +279,22 @@ class Mary:
         """Straight to the model, with a tool result already in front of it."""
         try:
             reply = self.agent.run(text, latency=latency, prefetch=prefetch)
+            self._reply = reply
             question = conversation.offer_in(reply)
             self.offer = (question, time.monotonic()) if question else None
             self.asked = reply.rstrip().endswith("?")
         except LLMOffline as e:
+            self._failed = True
             log.warning("request needed the LLM, which is offline: %s", e)
             self.output.say(OFFLINE_REPLY)
         except Exception as e:
+            self._failed = True
             log.exception("request failed: %s", text)
             self.output.state(ERROR)
             self.output.say(f"Sorry, something went wrong: {e}")
         finally:
             self.output.state(IDLE)
+        self._write_diary(text)
         write_jsonl("latency", latency.as_dict())
         if prefill:
             self.agent.prefill_in_background()
@@ -243,6 +331,7 @@ class Mary:
             reply = self.router.reply(d, None)
         latency.mark("reply")
         self.output.say(reply)
+        self._reply = reply
         self.agent.remember_direct(d.text, d.tool, d.args, result_text, reply)
         if d.slot and d.slot.fill.get("await"):
             self.awaiting = d.slot.fill["await"]

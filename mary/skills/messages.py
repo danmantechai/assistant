@@ -252,10 +252,81 @@ def _join(names: list[str]) -> str:
     return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
 
 
+_TIME = re.compile(r"\s*(?:\d{1,2}:\d{2}\s*(?:[AP]M)?|yesterday|today|monday|tuesday|wednesday|thursday|friday|"
+                   r"saturday|sunday|\d{1,2}/\d{1,2}/\d{2,4})\s*$", re.I)
+_UNREAD = re.compile(r"(\d+)\s+unread message", re.I)
+
+
+def _chat_list(page):
+    """The area that lists chats: the one with the most lines ending in a time ("6:19 PM", "Yesterday")."""
+    def times(r):
+        return sum(bool(_TIME.search(line)) for line in r.lines)
+    best = max(page.regions, key=times, default=None)
+    return best if best is not None and times(best) >= 2 else None
+
+
+def check_in_own_browser(cfg, read: str | None) -> ToolResult:
+    """WhatsApp Web in MARY's own browser, read through the page's structure: the chat list area, the unread
+    badges by their accessible names, and (only when asked) one chat, opened by clicking its name."""
+    from mary import web
+    from mary.page import read as read_area
+    from mary.skills.web import open_page
+
+    b = web.browser(cfg)
+    open_page(URL, cfg)  # the tab already showing it, if there is one
+    page, chats = None, None
+    deadline = time.monotonic() + 25  # a fresh WhatsApp Web load takes a while
+    while time.monotonic() < deadline:
+        data = b.snapshot()
+        if _LOGIN_RE.search(" ".join(t["text"] for t in data["texts"])):
+            return ToolResult(False, "WhatsApp Web isn't linked in MARY's browser yet; it's showing its QR code.",
+                              say="WhatsApp needs linking once: scan the QR code in my browser window with your "
+                                  "phone, under WhatsApp, Linked devices.")
+        page = web.page_from(data)
+        chats = _chat_list(page)
+        if chats is not None:
+            break
+        time.sleep(0.6)
+    if chats is None:
+        return ToolResult(False, "WhatsApp Web is open in MARY's browser, but its chat list didn't show.")
+    if read:  # only now does message text leave the screen
+        try:
+            b.click_text(read)
+        except Exception:
+            return ToolResult(False, f"No chat called '{read}' is showing in the list.")
+        time.sleep(0.8)
+        page = web.page_from(b.snapshot())
+        convo = next((r for r in page.regions if r is not chats and r.chat_like), None) or page.main()
+        return ToolResult(True, f"The chat with {read}, oldest first; → marks the user's own messages:\n"
+                                f"{read_area(convo, 2500)}", say=None)
+    unread, names = 0, []
+    for n, line in enumerate(chats.lines):
+        hit = _UNREAD.search(line)
+        if hit:
+            unread += 1
+            above = chats.lines[n - 1] if n else ""
+            names.append(_TIME.sub("", above).strip() or "someone")
+    if not unread:
+        return ToolResult(True, "No unread WhatsApp messages.", say="No new WhatsApp messages.")
+    plural = "chat" if unread == 1 else "chats"
+    listing = "\n".join(chats.lines[:30])
+    return ToolResult(True, f"{unread} WhatsApp {plural} with unread messages, from {', '.join(names)}. The chat "
+                            f"list as shown (message text not read):\n{listing}",
+                      say=f"You have unread messages in {unread} {plural}, from {_join(names[:3])}"
+                          f"{' and others' if unread > 3 else ''}.")
+
+
 def tools(ctx: ToolContext) -> list[Tool]:
     def check_messages(app: str = "whatsapp", read: str | None = None) -> ToolResult:
         if "whatsapp" not in app.lower():
             return ToolResult(False, f"I can only check WhatsApp so far, not {app}.")
+        from mary.skills.web import own_browser
+
+        if own_browser(ctx.cfg):
+            try:
+                return check_in_own_browser(ctx.cfg, read)
+            except Exception as e:  # MARY's browser can't run here: the screen way still works
+                log.warning("WhatsApp in MARY's browser failed: %s", e)
         win = _whatsapp_window()
         if win is None and _select_whatsapp_tab():
             time.sleep(0.8)
@@ -324,6 +395,6 @@ def tools(ctx: ToolContext) -> list[Tool]:
         "Set read to a chat name only when the user asks what someone said.",
         {"app": {"type": "string", "description": "only 'whatsapp' for now"},
          "read": {"type": "string", "description": "chat name whose latest message to read out"}},
-        [], check_messages, speaks_for_itself=True, private=True,
+        [], check_messages, speaks_for_itself=True, private=True, watch=False,
         announce=lambda a: "Checking WhatsApp…",
     )]

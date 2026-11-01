@@ -60,18 +60,25 @@ def enable_console_colors() -> None:
 _instance_mutex = None
 
 
-def single_instance(name: str) -> bool:
+def single_instance(name: str, wait_s: float = 0) -> bool:
     """False if another MARY already holds the named mutex. Two voice instances fight over the
-    hotkey and the mic (and both answer), which is easy to cause with start-at-sign-in plus run.bat."""
+    hotkey and the mic (and both answer), which is easy to cause with start-at-sign-in plus run.bat.
+    wait_s: keep trying this long (after a restart, the old MARY may still be closing)."""
+    import time
+
     global _instance_mutex
     k32 = ctypes.WinDLL("kernel32", use_last_error=True)
     k32.CreateMutexW.restype = wintypes.HANDLE
-    handle = k32.CreateMutexW(None, False, f"Local\\{name}")
-    if ctypes.get_last_error() == 183:  # ERROR_ALREADY_EXISTS
+    deadline = time.monotonic() + wait_s
+    while True:
+        handle = k32.CreateMutexW(None, False, f"Local\\{name}")
+        if ctypes.get_last_error() != 183:  # ERROR_ALREADY_EXISTS
+            _instance_mutex = handle  # held until the process exits
+            return True
         k32.CloseHandle(handle)
-        return False
-    _instance_mutex = handle  # held until the process exits
-    return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.5)
 
 
 _com_state = threading.local()

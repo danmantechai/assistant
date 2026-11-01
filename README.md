@@ -56,12 +56,24 @@ To start MARY whenever you sign in:
 
 ## Make her yours
 
-Your settings go in `user/config.yaml`, which is created for you and stays private. It's merged over
+**The settings page** is the easy way: right-click the tray icon › **Settings…** (or double-click
+`settings.bat`). In your browser, on this PC only, you can:
+- create your own assistant (a persona): their name, personality, how they talk and write, and their stories
+- pick a voice (female or male, on your PC or from ElevenLabs) and hear it
+- choose a ready-made wake word, or record and train your own phrase right there
+- tell it your name, and choose the model, the microphone and the skills
+
+It edits the same files you could edit by hand, keeping their comments.
+
+By hand: your settings go in `user/config.yaml`, which is created for you and stays private. It's merged over
 `config.yaml`, where every option is explained, so you only list what you change.
 
-- **Her voice:** `python -m mary.voices` plays the built-in voices; `--set bf_emma` picks one.
-- **Your wake word:** record your voice and train it on your PC (about half an hour). See
-  [the guide](docs/guide.md#wake-word-hey-mary-or-hey-mom).
+- **Her character:** a persona pack says who she is, how she talks and writes, her voice, her wake phrase and the
+  stories she knows. Make your own with `python -m mary.persona new <name>`, or bring one in from a WhatsApp chat
+  or a Character Card. See [personas](docs/personas.md).
+- **Her voice:** `python -m mary.voices` plays the built-in voices; set one in her persona.
+- **Your wake word:** any phrase, recorded and trained on your PC from the settings page (about 5 minutes of
+  recording, then 10–20 of training). See [personas](docs/personas.md#the-wake-phrase).
 - **A bigger brain:** `llm.model: qwen3:4b-q4_K_M` follows instructions better, but is about 3 times slower
   on a CPU. `llm.think_by_default: true` makes her think before every answer: wiser, slower.
 - **Optional cloud hearing and voice:** with an [ElevenLabs](https://elevenlabs.io) account, she can hear you
@@ -73,6 +85,7 @@ Your settings go in `user/config.yaml`, which is created for you and stays priva
 
 - [The full guide](docs/guide.md): everything she does, settings, troubleshooting, measurements
 - [How she's built](docs/architecture.md): the core, the bricks, the prompt layout, the two brain modes
+- [Personas](docs/personas.md): who she is, in one folder you can write, keep private or share
 - [Writing a skill](docs/skills.md): give her a new ability in one file
 - [Privacy](docs/privacy.md): what stays on your PC, what the optional services send
 - [Contributing](CONTRIBUTING.md)

@@ -1,0 +1,44 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Chatter</title>
+<style>
+  body { margin: 0; font: 15px sans-serif; display: flex; height: 100vh; background: #111; color: #eee; }
+  aside { width: 30%; background: #1b1b1b; border-right: 1px solid #444; }
+  main { flex: 1; display: flex; flex-direction: column; background: #0d0d0d; }
+  header { padding: 14px; border-bottom: 1px solid #444; }
+  .chat { padding: 12px; border-bottom: 1px solid #222; cursor: pointer; }
+  .badge { background: #2a2; border-radius: 9px; padding: 0 6px; margin-left: 8px; }
+  .log { flex: 1; padding: 16px; }
+  .msg { max-width: 45%; margin: 10px 0; padding: 8px 12px; border-radius: 8px; background: #222; }
+  .mine { margin-left: auto; background: #154; }
+  .day { text-align: center; color: #999; }
+  footer { padding: 12px; border-top: 1px solid #444; }
+  [contenteditable] { background: #222; padding: 8px; }
+</style></head>
+<body>
+<aside aria-label="Chats">
+  <div style="padding:14px">Chats</div>
+  <div class="chat" role="button" tabindex="0" onclick="openChat('Kofi')">Kofi <span>6:19 PM</span><br>Meet me at the junction <span class="badge" aria-label="2 unread messages">2</span></div>
+  <div class="chat" role="button" tabindex="0" onclick="openChat('Ama')">Ama <span>5:28 PM</span><br>Thanks boss</div>
+</aside>
+<main>
+  <header><span id="name">Ama</span> <button aria-label="Video call">&#9742;</button></header>
+  <div class="log" id="log">
+    <div class="msg">Pray ohh</div>
+    <div class="msg mine">I sent her 100 on Thursday</div>
+    <div class="msg">Eei</div>
+    <div class="day">Today</div>
+    <div class="msg mine">Yh</div>
+    <div class="msg">Thanks boss</div>
+  </div>
+  <footer><div contenteditable="true" aria-label="Type a message" id="box"></div></footer>
+</main>
+<script>
+  function openChat(name) {
+    document.getElementById('name').textContent = name;
+    document.getElementById('log').innerHTML = name === 'Kofi'
+      ? '<div class="msg">Where are you?</div><div class="msg">Meet me at the junction</div><div class="msg mine">Coming</div>'
+      : document.getElementById('log').innerHTML;
+  }
+  document.getElementById('box').focus();
+</script>
+</body></html>

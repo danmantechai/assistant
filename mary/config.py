@@ -83,14 +83,22 @@ def expand_path(template: str) -> Path:
 
 
 def load_config(path: str | os.PathLike | None = None) -> Section:
-    """config.yaml with user/config.yaml merged over it (a config file passed by path is read alone)."""
+    """config.yaml, then what the persona brings (her voice, wake words and replies), then user/config.yaml over
+    both, so your own settings always win. A config file passed by path is read alone."""
     path = Path(path) if path else DEFAULT_CONFIG
     with open(path, encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
-    mine = user_dir() / "config.yaml"
-    if path == DEFAULT_CONFIG and mine.exists():
-        with open(mine, encoding="utf-8") as f:
-            data = merge(data, yaml.safe_load(f) or {})
+    if path == DEFAULT_CONFIG:
+        from mary import persona
+
+        mine = {}
+        if (user_dir() / "config.yaml").exists():
+            with open(user_dir() / "config.yaml", encoding="utf-8") as f:
+                mine = yaml.safe_load(f) or {}
+        her = persona.load(mine.get("persona") or data.get("persona"))
+        data = merge(merge(data, her.config()), mine)
+        stt = data.setdefault("stt", {})
+        stt["words"] = list(dict.fromkeys(her.words() + list(stt.get("words") or [])))
     cfg = Section.wrap(data)
     cfg["config_path"] = str(path)
     return cfg

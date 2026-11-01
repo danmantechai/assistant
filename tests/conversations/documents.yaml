@@ -1,0 +1,157 @@
+# What a document says is read by code (read_document), never with PowerShell on the file or by opening it to read
+# the screen: asked to "check out" a bank statement PDF in the replay, she ran Get-Content on the PDF and tried
+# Add-Type System.Drawing. Follow-ups read only what they need (find, pages); a scan has no text, so it's for look.
+name: Documents
+turns:
+  - user: "I have my bank statements in documents. See if you can find a PDF containing my bank statements and check it out for me."
+    expect: {tools: [find_files, read_document], avoid: [run_powershell, file_action, read_screen, look, web]}
+    results:
+      find_files: |-
+        2 PDF file(s) in Documents, newest first:
+        1. Bank Statement October 2026.pdf | Documents | Thu 29 Oct | 35 KB
+        2. Bank Statement September 2026.pdf | Documents | Mon 28 Sep | 34 KB
+      read_document:   # successive calls read on, as the brick's notes say
+        - |-
+          Bank Statement October 2026.pdf (PDF, 3 pages):
+          [page 1]
+          Northwind Community Bank
+
+          Statement for Sam Example · Account 12-34-56 0012 3456
+          Period: 1 October 2026 to 31 October 2026
+
+          Summary
+
+          Opening balance: £2,450.00
+          Money in: £6,300.00
+          Closing balance: £2,755.23
+
+          Transactions
+
+          Date         Description          Paid out    Paid in  Balance
+          01 Oct 2026  Netflix                  72.88            2,377.12
+          01 Oct 2026  City Transit Pass       148.37            2,228.75
+          01 Oct 2026  Pharmacy Plus           106.15            2,122.60
+          02 Oct 2026  Corner Cafe               9.64            2,112.96
+          02 Oct 2026  Bookworm Books           15.36            2,097.60
+          02 Oct 2026  SALARY ACME WIDGETS             3,150.00  5,247.60
+          03 Oct 2026  Bookworm Books           13.46            5,234.14
+          04 Oct 2026  City Transit Pass       170.70            5,063.44
+          05 Oct 2026  Water Board             170.74            4,892.70
+          … 58 lines skipped (the rest of page 1 and the start of page 2) …
+          [page 2]
+          25 Oct 2026  Netflix                94.39            2,987.06
+          25 Oct 2026  Online Market          67.03            2,920.03
+          26 Oct 2026  Online Market        164.80             2,755.23
+          [page 3]
+          Thank you for banking with us.
+          To read what was skipped: read_document again with pages='1-2', from_line=24, or with find='words'.
+        - |-
+          Bank Statement October 2026.pdf (PDF, 3 pages), pages 1–2, from line 24:
+          [page 1]
+          06 Oct 2026  Water Board              73.21            4,819.49
+          06 Oct 2026  Greenleaf Grocers       101.53            4,717.96
+          06 Oct 2026  Bright Energy Ltd        77.19            4,640.77
+          07 Oct 2026  City Transit Pass       104.05            4,536.72
+          08 Oct 2026  Netflix                  21.24            4,515.48
+          09 Oct 2026  Corner Cafe              68.91            4,446.57
+          10 Oct 2026  City Transit Pass       102.89            4,343.68
+          11 Oct 2026  Corner Cafe              90.87            4,252.81
+          12 Oct 2026  Bookworm Books          140.57            4,112.24
+          12 Oct 2026  Water Board             166.45            3,945.79
+          12 Oct 2026  Bright Energy Ltd        46.97            3,898.82
+          12 Oct 2026  Corner Cafe              17.49            3,881.33
+          12 Oct 2026  Online Market            90.64            3,790.69
+          12 Oct 2026  Hilltop Fuel             53.96            3,736.73
+          12 Oct 2026  City Transit Pass        93.61            3,643.12
+          12 Oct 2026  Pharmacy Plus            29.90            3,613.22
+          12 Oct 2026  Bookworm Books            9.94            3,603.28
+          13 Oct 2026  City Transit Pass       138.33            3,464.95
+          14 Oct 2026  Pharmacy Plus            63.20            3,401.75
+          To read on: read_document again with pages='1-2', from_line=43.
+        - |-
+          Bank Statement October 2026.pdf (PDF, 3 pages), pages 1–2, from line 43:
+          [page 1]
+          14 Oct 2026  Water Board              90.91            3,310.84
+          [page 2]
+          14 Oct 2026  City Transit Pass    151.67             3,159.17
+          14 Oct 2026  Hilltop Fuel         126.38             3,032.79
+          14 Oct 2026  Greenleaf Grocers    132.42             2,900.37
+          14 Oct 2026  Water Board          178.78             2,721.59
+          14 Oct 2026  Bright Energy Ltd    129.84             2,591.75
+          15 Oct 2026  Pharmacy Plus           6.99            2,584.76
+          15 Oct 2026  Pharmacy Plus          32.74            2,552.02
+          15 Oct 2026  Hilltop Fuel           13.43            2,538.59
+          15 Oct 2026  Netflix              133.69             2,404.90
+          15 Oct 2026  Bookworm Books       165.28             2,239.62
+          15 Oct 2026  City Transit Pass      32.45            2,207.17
+          15 Oct 2026  SALARY ACME WIDGETS           3,150.00  5,357.17
+          16 Oct 2026  Bright Energy Ltd    159.36             5,197.81
+          16 Oct 2026  Online Market          52.28            5,145.53
+          16 Oct 2026  Pharmacy Plus        123.84             5,021.69
+          16 Oct 2026  Corner Cafe            29.71            4,991.98
+          16 Oct 2026  Netflix                44.06            4,947.92
+          16 Oct 2026  Greenleaf Grocers      88.84            4,859.08
+          17 Oct 2026  Netflix                49.51            4,809.57
+          To read on: read_document again with pages='2', from_line=20.
+        - |-
+          Bank Statement October 2026.pdf (PDF, 3 pages), page 2, from line 20:
+          [page 2]
+          17 Oct 2026  Netflix                77.15            4,732.42
+          17 Oct 2026  Water Board          103.24             4,629.18
+          17 Oct 2026  Online Market        171.19             4,457.99
+          18 Oct 2026  Greenleaf Grocers      83.83            4,374.16
+          19 Oct 2026  Online Market          72.45            4,301.71
+          19 Oct 2026  Bookworm Books         21.33            4,280.38
+          20 Oct 2026  Bookworm Books         14.02            4,266.36
+          20 Oct 2026  Corner Cafe            80.99            4,185.37
+          20 Oct 2026  Pharmacy Plus        109.33             4,076.04
+          20 Oct 2026  Greenleaf Grocers    103.32             3,972.72
+          21 Oct 2026  City Transit Pass    170.96             3,801.76
+          22 Oct 2026  Greenleaf Grocers      15.45            3,786.31
+          22 Oct 2026  Water Board            69.59            3,716.72
+          23 Oct 2026  Bright Energy Ltd    172.12             3,544.60
+          24 Oct 2026  Pharmacy Plus          86.92            3,457.68
+          24 Oct 2026  Hilltop Fuel         178.78             3,278.90
+          24 Oct 2026  Hilltop Fuel           88.64            3,190.26
+          24 Oct 2026  Netflix                21.09            3,169.17
+          24 Oct 2026  Bright Energy Ltd      87.72            3,081.45
+          25 Oct 2026  Netflix                94.39            2,987.06
+          To read on: read_document again with pages='2', from_line=40.
+        - |-
+          Bank Statement October 2026.pdf (PDF, 3 pages), page 2, from line 40:
+          [page 2]
+          25 Oct 2026  Online Market          67.03            2,920.03
+          26 Oct 2026  Online Market        164.80             2,755.23
+  - user: "How much did I spend on Netflix?"
+    expect: {tools: [read_document, calculate], avoid: [run_powershell, file_action, read_screen, look]}
+    results:
+      read_document: |-
+        Bank Statement October 2026.pdf (PDF, 3 pages): 8 lines with 'netflix':
+        [page 1]
+        01 Oct 2026  Netflix                  72.88            2,377.12
+        08 Oct 2026  Netflix                  21.24            4,515.48
+        [page 2]
+        15 Oct 2026  Netflix              133.69             2,404.90
+        16 Oct 2026  Netflix                44.06            4,947.92
+        17 Oct 2026  Netflix                49.51            4,809.57
+        17 Oct 2026  Netflix                77.15            4,732.42
+        24 Oct 2026  Netflix                21.09            3,169.17
+        25 Oct 2026  Netflix                94.39            2,987.06
+      calculate: {text: "72.88 + 21.24 + 133.69 + 44.06 + 49.51 + 77.15 + 21.09 + 94.39 = 514.01", say: "That's 514.01."}
+  - user: "What does the last page say?"
+    expect: {tools: [read_document], avoid: [run_powershell, file_action, read_screen, look]}
+    results:
+      read_document: |-
+        Bank Statement October 2026.pdf (PDF, 3 pages), page 3:
+        [page 3]
+        Thank you for banking with us.
+  # A scan has no text layer: after read_document says so, it's opened and seen (look, or read_screen's OCR)
+  - user: "And read me the letter from the council in my downloads."
+    expect: {tools: [find_files, read_document], avoid: [run_powershell, web]}
+    results:
+      find_files: |-
+        1 file(s) in Downloads, newest first:
+        1. Council Tax Letter.pdf | Downloads | Tue 27 Oct | 412 KB
+      read_document: {text: "Council Tax Letter.pdf (PDF, 1 page): it's scanned, so its pages are pictures with no text to read. Open it (file_action) and look can read it from the screen.", say: "It's a scan, so there's no text in it to read."}
+      file_action: {text: "Opened C:\\Users\\sam\\Downloads\\Council Tax Letter.pdf.", say: "Opening Council Tax Letter.pdf."}
+      look: {text: "Looking at 'Council Tax Letter.pdf - Microsoft Edge': A letter from Riverside Council saying the council tax for 2026/27 is £1,842, paid in 10 instalments of £184.20 from 1 November."}

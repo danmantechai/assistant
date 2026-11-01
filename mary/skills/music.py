@@ -105,18 +105,27 @@ def tools(ctx: ToolContext) -> list[Tool]:
         return ToolResult(True, f"{why} Opened a YouTube search for '{query}' instead.",
                           say=f"{why} I've opened YouTube results for {query or 'music'} instead.")
 
+    launched = {"at": None}  # when this tool last started Spotify
+
     def play_music(query: str | None = None) -> ToolResult:
+        # Spotify still starting is "not yet": the feedback loop (mary/ready.py) waits until its window has
+        # settled, then calls this again. Nothing here guesses how long a start takes.
         query = (query or "").strip()
         win = uia.app_window(EXE)
         if win is None:
-            match = ctx.apps.match("spotify")
-            if match.app is None:
-                return youtube_fallback(query, "Spotify isn't installed.")
-            ctx.apps.launch(match.app)
-            win = uia.app_window(EXE, timeout=15)
-            if win is None:
+            started = launched["at"]
+            if started is not None and time.monotonic() - started > 60:
+                launched["at"] = None
                 return youtube_fallback(query, "Spotify didn't open.")
-            time.sleep(2)  # let the home page finish loading before we type
+            if started is None:
+                match = ctx.apps.match("spotify")
+                if match.app is None:
+                    return youtube_fallback(query, "Spotify isn't installed.")
+                ctx.apps.launch(match.app)
+                launched["at"] = time.monotonic()
+            return ToolResult(False, "Spotify is starting.", say="Spotify's starting.", status="not_yet",
+                              waits_for=EXE)
+        launched["at"] = None
         winutil.focus_window(win.handle)
 
         if not query:  # "play some music": resume, or start Liked Songs
@@ -132,8 +141,9 @@ def tools(ctx: ToolContext) -> list[Tool]:
             return ToolResult(False, "Spotify didn't start playing. Is it logged in?")
 
         box = _search_box(win)
-        if box is None:
-            return youtube_fallback(query, "I couldn't find Spotify's search box.")
+        if box is None:  # its window is up but the page is still loading: not yet
+            return ToolResult(False, "Spotify's search box isn't showing yet.", say="Spotify's still loading.",
+                              status="not_yet", waits_for=EXE)
         before = [b.element_info.name for b in _play_buttons(win)]
         box.set_focus()
         from pywinauto.keyboard import send_keys

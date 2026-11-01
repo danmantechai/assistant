@@ -17,11 +17,13 @@ import re
 import threading
 import time
 
+from mary import persona as personas
 from mary import skills
 from mary.brain import BrainGarbled, BrainLost, BrainOffline, make_brain
 from mary.brain import mode as brain_mode
 from mary.latency import Latency
 from mary.llm.context import live_context
+from mary.memory import recall
 from mary.llm.prompts import SYSTEM_PROMPT, new_prompt
 from mary.llm.replies import CLARIFY, ReplyFilter
 from mary.output import DEEP_THINKING, THINKING, Output
@@ -34,6 +36,9 @@ log = logging.getLogger(__name__)
 _PROMISE = re.compile(r"\b(?:let me|i'?ll|i will|i'?m going to)\b[^.?!]*\b(?:do (?:that|it)|check|take|capture|open|"
                       r"search|look|find|remember|note|play|read|type|set|start|save|put|show|get)\b", re.I)
 
+# Requests where she'll write text (a note, typing, a message): her persona's writing examples come along.
+_WRITING = re.compile(r"\b(?:write|type|note|text|message|reply|draft|letter|email)\b", re.I)
+
 OFFLINE_REPLY = ("I can't reach my language model right now, so I can only do simple things, like opening apps, "
                  "music, volume or the time.")
 
@@ -43,7 +48,7 @@ class LLMOffline(RuntimeError):
 
 
 class Agent:
-    def __init__(self, cfg, tools: ToolRegistry, output: Output, profile=None):
+    def __init__(self, cfg, tools: ToolRegistry, output: Output, profile=None, memory=None):
         self.cfg = cfg.llm
         self.tools = tools
         self.output = output
@@ -55,9 +60,11 @@ class Agent:
         self.think_default = bool(self.cfg.get("think_by_default"))
         bricks = getattr(tools, "bricks", [])
         self.slow = skills.slow(bricks) if self.new_mode else {}
-        prompt = new_prompt(skills.guides(bricks)) if self.new_mode else SYSTEM_PROMPT
+        self.persona = personas.of(cfg)
+        prompt = new_prompt(skills.guides(bricks), self.persona) if self.new_mode else SYSTEM_PROMPT
         self.system = {"role": "system", "content": prompt}
         self.profile = profile
+        self.memory = memory   # the store she recalls from: a few lines in each request's context, when they fit
         self.pinned = self._profile_messages()
         self.exchanges: list[list[dict]] = []   # each = the messages of one request/response
         self.last_activity = time.monotonic()
@@ -98,7 +105,7 @@ class Agent:
         from the end of an earlier prompt. Measured: a request after a prompt that ended on a dummy "hi"
         re-read all ~3,500 tokens (5.9 s); after one that ended on the last reply, 0.5 s.
         """
-        if self.offline_reason:
+        if self.offline_reason or not self.brain.local:  # a cloud brain keeps its own cache; each call would cost
             return
         self._prefill_wanted.set()
         if self._prefill_thread is None or not self._prefill_thread.is_alive():
@@ -162,6 +169,8 @@ class Agent:
         self.warming.set()
         try:
             self.brain.start()
+            if not self.brain.local:  # nothing to load here, and a pre-fill would be a billed call
+                return 0.0
             start = time.perf_counter()
             # Ends on the pinned "Noted.": every request starts with exactly this, so it continues from here
             # instead of re-reading it all (a dummy "hi" here cost 5.9 s on the first request, and again
@@ -235,7 +244,11 @@ class Agent:
         history = self._history(short=think)
         ctx = self.tools.ctx  # tools check destructive calls against what the user actually said
         ctx.prev_request, ctx.request = (ctx.request if history else ""), text
-        turn: list[dict] = [{"role": "user", "content": live_context(hint) + text}]
+        extra = self.persona.extras(text, writing=bool(_WRITING.search(text))) if self.new_mode else []
+        if self.memory is not None:
+            with latency.stage("memory"):
+                extra = [*extra, *recall.lines(self.memory, text)]
+        turn: list[dict] = [{"role": "user", "content": live_context(hint, extra) + text}]
         self.output.state(DEEP_THINKING if think else THINKING)
         reply, fallback = "", "Done."
         tools_ran = False  # with no tool and nothing but filler to say, MARY didn't understand
@@ -400,7 +413,8 @@ class Agent:
         """
         stream = self.brain.chat(messages, self.schemas, think=think)
         parts, calls, speaking, text_chunks = [], [], False, 0
-        sentences = ReplyFilter(greetings_ok=self.new_mode)  # filler sentences are dropped before they're spoken
+        # Filler sentences are dropped before they're spoken; in the new mode so is her own name used as his.
+        sentences = ReplyFilter(greetings_ok=self.new_mode, fix=self.persona.fix_address if self.new_mode else None)
 
         def emit(text: str) -> None:
             nonlocal speaking

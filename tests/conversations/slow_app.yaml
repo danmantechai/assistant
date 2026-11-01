@@ -1,0 +1,12 @@
+# A slow start (from a live session): Spotify was still loading, and play_music used to give up and open YouTube.
+# Now the result says it's still starting once MARY's own waiting runs out; she should call wait and try the same
+# step again, not switch to YouTube.
+name: Spotify still starting
+turns:
+  - user: "Play some Sarkodie on Spotify."
+    expect: {tools: [wait, play_music], avoid: [web]}
+    results:
+      play_music:
+        - {ok: false, status: not_yet, text: "Spotify is starting. Spotify is still starting: its window hasn't appeared, after 20 s.", say: "Spotify's starting."}
+        - {text: "Playing Sarkodie. Now playing: Sarkodie - Adonai. Now in front: Spotify, ready.", say: "Playing Sarkodie."}
+      wait: {text: "Waited 6 s. Now in front: Spotify, ready. Carry on with the step."}

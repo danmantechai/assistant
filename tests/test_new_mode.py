@@ -71,7 +71,7 @@ def fresh(mary, monkeypatch):
 
 def test_new_mode_has_no_router_and_her_own_prompt(mary):
     assert mary.router is None
-    assert "like a mother talking with her grown son" in mary.agent.system["content"]
+    assert mary.agent.persona.soul in mary.agent.system["content"]  # who she is comes from the persona pack
     assert "check_weather" in mary.agent.system["content"]  # the weather brick's guide line
 
 

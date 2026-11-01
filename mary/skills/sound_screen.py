@@ -126,7 +126,7 @@ def tools(ctx: ToolContext) -> list[Tool]:
              "(default 10; 'a bit' ~ 10, 'a lot' ~ 25). For *_set, value is the level 0-100.",
              {"action": {"type": "string", "enum": SYSTEM_ACTIONS},
               "value": {"type": "integer", "description": "step or level, 0-100"}},
-             ["action"], system_control, speaks_for_itself=True,
+             ["action"], system_control, speaks_for_itself=True, watch=False,
              announce=lambda a: f"{a.get('action', '').replace('_', ' ').capitalize()}"
                                 f"{' ' + str(a['value']) if 'value' in a else ''}…"),
     ]

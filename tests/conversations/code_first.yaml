@@ -1,0 +1,20 @@
+# Code first: a task a command can do is done with a command, not by clicking through windows; numbers are worked
+# out by calculate, never in the model's head; the forecast is a direct request.
+name: Code first
+turns:
+  - user: "How big is my Downloads folder?"
+    expect: {tools: [run_powershell], avoid: [open_app, screen, read_screen, look]}
+    results:
+      run_powershell: {text: "Downloads: 4.2 GB in 312 files (largest: setup.iso, 1.1 GB).", say: "About 4.2 gigabytes."}
+  - user: "What's fifteen percent of 230?"
+    expect: {tools: [calculate]}
+    results:
+      calculate: {text: "15% of 230 = 34.5", say: "34.5"}
+  - user: "And the square root of 316?"
+    expect: {tools: [calculate]}
+    results:
+      calculate: {text: "sqrt(316) = 17.7763888346", say: "About 17.78"}
+  - user: "Will it rain tomorrow in Lisbon?"
+    expect: {tools: [check_weather], avoid: [web, read_screen]}
+    results:
+      check_weather: {text: "Lisbon tomorrow: light rain in the afternoon, 17 to 22 degrees, 70% chance of rain.", say: "Light rain tomorrow afternoon."}

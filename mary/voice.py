@@ -85,9 +85,14 @@ class VoiceLoop(threading.Thread):
         self._next_mic_try = 0.0
         self.speculation: _Speculation | None = None  # set by record() when it still matches the audio
         self._in_flight: _Speculation | None = None   # the latest one started, valid or not
+        self.wake_paused_until = 0.0      # the settings page is recording wake-word takes: don't answer them
         voice_out.listener = self         # spoken confirmations listen through us
 
     # ------------------------------------------------------------------ triggers
+
+    def pause_wake(self, seconds: float) -> None:
+        """Ignore the wake word for a while (renewed with every take, so it lapses if the page goes away)."""
+        self.wake_paused_until = time.monotonic() + seconds
 
     def summon(self) -> None:
         """Hotkey pressed: finish the current recording, or interrupt MARY and listen, or start."""
@@ -173,6 +178,8 @@ class VoiceLoop(threading.Thread):
                     recent.append(frame)
                     heard.append(frame)
                     score = self.wakeword.detect(frame)
+                    if score is not None and time.monotonic() < self.wake_paused_until:
+                        score = None
                     if score is not None:
                         if not self._speech_in(recent):
                             log.info("wake word (%.4f) ignored: no speech in that moment", score)
@@ -277,7 +284,7 @@ class VoiceLoop(threading.Thread):
             log.info("heard %r -> %r (%.1f s audio, STT %.2f s, waited %.2f s, confidence %.2f, %s%s)", heard.raw,
                      heard.text, len(audio) / RATE, heard.seconds, stt_wait, heard.confidence,
                      heard.rejected or "accepted", f", {warning}" if warning else "")
-            request = strip_wake_phrase(heard.text)
+            request = strip_wake_phrase(heard.text, self.mary.agent.persona)
             if not request:
                 misses += 1
                 if heard.text:               # just "Hey Mary": she's listening, carry on

@@ -2,6 +2,7 @@
 
 # --- Core / brain ---
 pyyaml>=6.0
+ruamel.yaml>=0.18          # the settings page saves YAML with its comments kept (PyYAML drops them)
 numpy>=1.26
 ollama>=0.6.3              # official client; native tool calling + per-request `think`
 rapidfuzz>=3.14            # fuzzy app / window matching
@@ -25,6 +26,10 @@ winrt-Windows.Foundation>=3.0
 winrt-Windows.Foundation.Collections>=3.0
 winrt-Windows.Globalization>=3.0
 
+# --- Reading documents (the documents brick; Word, Excel and PowerPoint need nothing more) ---
+pypdf>=6.0                 # PDF text, pure Python
+cryptography>=42           # opens AES-locked PDFs (banks lock statements, often with no password)
+
 # --- Phase 2: semantic router ---
 fastembed>=0.9.1           # ONNX embeddings (BAAI/bge-small-en-v1.5)
 
@@ -44,8 +49,10 @@ elevenlabs>=2.75           # hearing in the cloud: Scribe v2 (stt.provider: elev
 python-dotenv>=1.2         # loads ELEVENLABS_API_KEY from .env (written by the ElevenLabs CLI; never in code)
 livekit>=1.2               # only for its build of WebRTC's audio processing: the browser's mic clean-up (audio.clean)
 
-# --- "Hey Mary" wake-word training only (exports the classifier; no PyTorch) ---
+# --- Wake-word training only (the settings page or python -m mary.wakeword_training; no PyTorch) ---
+scikit-learn>=1.5          # the small neural net a wake word is
 onnx>=1.16
 
 # --- Dev ---
 pytest>=8
+playwright>=1.48          # MARY's own browser (drives your installed Edge; no browser download)

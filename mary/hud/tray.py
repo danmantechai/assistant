@@ -61,7 +61,7 @@ class Tray(QObject):
     notice = Signal(str)
     tooltip = Signal(str)
 
-    def __init__(self, app, cfg, on_talk, on_quit, log_file: Path):
+    def __init__(self, app, cfg, on_talk, on_quit, log_file: Path, on_settings=None):
         super().__init__()
         self.icon = QSystemTrayIcon(reactor_icon(), app)
         self.icon.setToolTip("MARY · starting…")
@@ -69,6 +69,10 @@ class Tray(QObject):
         talk = QAction(f"Talk to MARY   ({cfg.hotkey.combo})", menu)
         talk.triggered.connect(on_talk)
         menu.addAction(talk)
+        if on_settings:
+            settings = QAction("Settings…", menu)  # her settings page, in your browser
+            settings.triggered.connect(on_settings)
+            menu.addAction(settings)
         menu.addSeparator()
         for label, path in (("What MARY remembers about you…", profile_path()),
                             ("Your settings (user/config.yaml)…", user_config()),

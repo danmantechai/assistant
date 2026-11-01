@@ -31,5 +31,5 @@ def tools(ctx: ToolContext) -> list[Tool]:
 
     return [
         Tool("take_screenshot", "Capture all screens to Pictures/MARY.", {}, [], take_screenshot,
-             speaks_for_itself=True, announce=lambda a: "Taking a screenshot…"),
+             speaks_for_itself=True, watch=False, announce=lambda a: "Taking a screenshot…"),
     ]

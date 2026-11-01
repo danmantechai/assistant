@@ -160,15 +160,13 @@ class SpeechToText:
         return heard.text, heard.seconds
 
 
-# "Hey Mary" as Whisper sometimes hears it. Said after the hotkey, it isn't part of the request.
-# "Mom"/"Mum" only with "hey" in front: "Mum's birthday is…" is a request, not the wake word.
-_WAKE_PHRASE = re.compile(r"^\W*(?:(?:(?:hey|hi|hay|ok|okay)[\s,]*)?(?:mary|marie|mari|mery|hate mary|hail mary|amen)|"
-                          r"(?:hey|hi|hay)[\s,]*(?:mom|mum|mommy|mummy|mam|ma))\b[\s,.!?]*", re.I)
+def strip_wake_phrase(text: str, persona=None) -> str:
+    """'Hey Mary, open Spotify' -> 'open Spotify'; 'Amen.' -> '' (only the wake phrase was said). Said after the
+    hotkey, the wake phrase isn't part of the request. The persona's wake phrases (and how speech recognition
+    writes them) decide; a name only counts alone where the persona says so: "Mum's birthday is…" is a request."""
+    from mary import persona as personas
 
-
-def strip_wake_phrase(text: str) -> str:
-    """'Hey Mary, open Spotify' -> 'open Spotify'; 'Amen.' -> '' (only the wake phrase was said)."""
-    return _WAKE_PHRASE.sub("", text, count=1).strip()
+    return (persona or personas.load()).wake_pattern().sub("", text, count=1).strip()
 
 
 def denoise(audio: np.ndarray, strength: float = 1.5) -> np.ndarray:

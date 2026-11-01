@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MARY Settings</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/settings.css">
+<script src="/settings.js" defer></script>
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <div class="brand"><span class="reactor" aria-hidden="true"></span><b>MARY</b><span class="muted">Settings</span></div>
+    <div class="switcher" id="switcher"></div>
+    <nav class="nav" id="nav" aria-label="Settings"></nav>
+    <div class="side-foot" id="status" aria-live="polite"></div>
+  </aside>
+  <main id="main" tabindex="-1"><p class="muted loading">Loading…</p></main>
+</div>
+<div class="bar" id="bar" hidden></div>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+<dialog id="dialog" aria-labelledby="dialog-title"></dialog>
+<noscript><p class="noscript">This page needs JavaScript. It runs only on this PC.</p></noscript>
+</body>
+</html>

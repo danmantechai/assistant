@@ -1,0 +1,30 @@
+# A persona template: who your assistant is. The easiest way to make one is the settings page (tray icon ›
+# Settings…, or settings.bat › Persona › New persona). By hand: copy this folder to user/personas/<name>/ (private,
+# never published), fill it in, and set  persona: <name>  in user/config.yaml. Every setting is optional;
+# personas/mary/persona.yaml explains each one. Leave out wake: to keep "Hey Mary", and voice: to keep the voice
+# in config.yaml.
+
+name: MARY
+
+# Nicknames: what you call your assistant ("Grandpa", "Ama"…). If it ever uses one as *your* name, that's
+# dropped before it speaks.
+nicknames: []
+
+# wake:
+#   - phrase: Hey Grandpa
+#     model: hey_grandpa          # trained on your voice (settings page › Wake word), or a built-in: hey_jarvis,
+#                                 # alexa, hey_mycroft, hey_rhasspy
+#     names: [grandpa, granpa]    # how speech recognition may write the name
+#     alone: []
+#     misheard: []
+#     bare: false
+
+replies: ["Yes?", "I'm listening."]
+morning_replies: ["Morning!"]
+
+greeting: "{part}, {name}. I'm ready when you are."
+
+# voice:
+#   provider: kokoro              # or elevenlabs (needs a key; see docs/privacy.md)
+#   voice: af_heart               # Kokoro voice: python -m mary.voices plays them
+#   elevenlabs: {voice_id: "", model: eleven_v4_turbo}

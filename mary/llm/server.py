@@ -52,10 +52,27 @@ def ensure_server(host: str, server_env: dict | None = None, wait_s: float = 20)
     raise OllamaUnavailable("Started Ollama but it isn't answering. Try running `ollama serve` yourself.")
 
 
-def ensure_model(client, model: str) -> None:
-    names = {m.model for m in client.list().models}
-    if model not in names and f"{model}:latest" not in names:
+def is_cloud(model: str) -> bool:
+    """Ollama's cloud models are named so (beam:cloud, gpt-oss:120b-cloud)."""
+    return model.endswith((":cloud", "-cloud"))
+
+
+def ensure_model(host: str, model: str) -> dict:
+    """The model is added to this Ollama: where it runs and the thinking levels it offers.
+    {"cloud": bool, "levels": ["low", "medium", …] or []}; levels are empty for a plain on/off thinker."""
+    try:
+        listed = httpx.get(f"{host}/api/tags", timeout=10).json().get("models") or []
+    except (httpx.HTTPError, ValueError) as e:
+        raise OllamaUnavailable(f"Ollama didn't answer ({e})") from e
+    found = next((m for m in listed if m.get("model") in (model, f"{model}:latest")), None)
+    if found is None:
         raise OllamaUnavailable(f"The model '{model}' isn't downloaded yet. Run: ollama pull {model}")
+    try:
+        thinking = httpx.post(f"{host}/api/show", json={"model": model}, timeout=10).json().get("thinking") or {}
+    except (httpx.HTTPError, ValueError):
+        thinking = {}
+    return {"cloud": bool(found.get("remote_host")) or is_cloud(model),
+            "levels": [v for v in thinking.get("values") or [] if isinstance(v, str)]}
 
 
 def main() -> None:
@@ -66,7 +83,11 @@ def main() -> None:
 
     from mary.config import load_config
 
-    cfg = load_config().llm
+    full = load_config()
+    if (full.get("brain") or {}).get("provider", "ollama") != "ollama":
+        print("  ok   the brain is a service (brain.provider), nothing to download")
+        return
+    cfg = full.llm
     try:
         ensure_server(cfg.host, dict(cfg.server_env or {}))
     except OllamaUnavailable as e:

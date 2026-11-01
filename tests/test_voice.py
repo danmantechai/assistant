@@ -40,7 +40,6 @@ def test_strip_wake_phrase(heard, wanted):
     assert strip_wake_phrase(heard) == wanted
 from mary.audio.tts import VoiceOutput, speakable
 from mary.config import DEFAULT_CONFIG
-from mary.voices import with_voice
 
 
 def test_speakable():
@@ -97,15 +96,6 @@ def test_level_of():
     assert 0.8 < level_of(loud) <= 1.0
 
 
-def test_with_voice_changes_only_tts_voice():
-    text = DEFAULT_CONFIG.read_text(encoding="utf-8")
-    new = with_voice(text, "bf_emma")
-    assert new is not None and "voice: bf_emma" in new
-    assert len(new.splitlines()) == len(text.splitlines())
-    changed = [(a, b) for a, b in zip(text.splitlines(), new.splitlines()) if a != b]
-    assert len(changed) == 1 and changed[0][1].strip().startswith("voice: bf_emma")
-
-
 @pytest.mark.parametrize("text, spoken", [
     ("It is 19:04.", "It is 7 oh four PM."),
     ("It costs $1,000,000.", "It costs 1,000,000 dollars."),
@@ -147,25 +137,29 @@ def test_first_clause_is_spoken_before_the_sentence_ends():
     assert tts.said[-1] == "because there's patchy rain nearby."
 
 
-def test_wake_word_switch_keeps_the_rest_of_config(tmp_path, monkeypatch):
-    import mary.config as config
+def test_wake_word_switch_goes_to_your_settings(tmp_path, monkeypatch):
+    from mary import persona as personas
+    from mary.config import load_config
     from mary.wakeword_training.train import good_enough, set_enabled
-    copy = tmp_path / "config.yaml"
-    copy.write_text(DEFAULT_CONFIG.read_text(encoding="utf-8"), encoding="utf-8")
-    monkeypatch.setattr(config, "DEFAULT_CONFIG", copy)
-    on = "enabled: true" in next(l for l in copy.read_text(encoding="utf-8").splitlines()[
-        copy.read_text(encoding="utf-8").splitlines().index("wakeword:"):] if "enabled:" in l)
-    set_enabled(not on)  # flip whatever the real config says now
-    before, after = DEFAULT_CONFIG.read_text(encoding="utf-8").splitlines(), copy.read_text(encoding="utf-8").splitlines()
-    changed = [(a, b) for a, b in zip(before, after) if a != b]
-    assert len(before) == len(after) and len(changed) == 1
-    assert f"enabled: {'false' if on else 'true'}" in changed[0][1]
+
+    monkeypatch.setenv("MARY_USER_DIR", str(tmp_path))
+    personas._load.cache_clear()
+    before = DEFAULT_CONFIG.read_bytes()
+    set_enabled(True)
+    assert load_config().wakeword.enabled is True
+    set_enabled(False)  # the default: the line goes again
+    assert load_config().wakeword.enabled is False and "wakeword" not in (tmp_path / "config.yaml").read_text()
+    assert DEFAULT_CONFIG.read_bytes() == before
     assert good_enough({"recall_your_voice_heldout": 0.9, "false_triggers_per_hour_heldout": 0.3})[0]
     assert not good_enough({"recall_your_voice_heldout": None})[0]
     assert not good_enough({"recall_your_voice_heldout": 0.6, "false_triggers_per_hour_heldout": 0.1})[0]
 
 
 def test_wake_phrases_are_stripped():
-    assert strip_wake_phrase("Hey Mom, open Spotify") == "open Spotify"
-    assert strip_wake_phrase("Hey mum.") == ""
-    assert strip_wake_phrase("Mum's birthday is on Friday") == "Mum's birthday is on Friday"
+    from tests.conftest import mom_persona
+
+    mom = mom_persona()  # the persona's wake phrases decide
+    assert strip_wake_phrase("Hey Mom, open Spotify", mom) == "open Spotify"
+    assert strip_wake_phrase("Hey mum.", mom) == ""
+    assert strip_wake_phrase("Mum's birthday is on Friday", mom) == "Mum's birthday is on Friday"
+    assert strip_wake_phrase("Hey Mom, open Spotify") == "Hey Mom, open Spotify"  # not the default persona's

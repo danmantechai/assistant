@@ -300,7 +300,8 @@ def tools(ctx: ToolContext) -> list[Tool]:
                               say="I only move or recycle single files, not whole folders.")
         if action == "open":
             os.startfile(target)
-            return ToolResult(True, f"Opened {target}.", say=f"Opening {target.name}.")
+            return ToolResult(True, f"Opened {target}.", say=f"Opening {target.name}.",
+                              waits_for="front")  # the loop waits until it's showing
         if action == "recycle":
             from send2trash import send2trash
 
@@ -352,7 +353,7 @@ def tools(ctx: ToolContext) -> list[Tool]:
                                                              "video, audio, archive, or an extension"},
               "modified_within": {"type": "string", "description": "e.g. today, yesterday, this week, 3 days, "
                                                                    "this month"}},
-             [], find_files, speaks_for_itself=True, announce=lambda a: "Searching files…"),
+             [], find_files, speaks_for_itself=True, watch=False, announce=lambda a: "Searching files…"),
         Tool("file_action",
              "Open a file, move it to another folder, or send it to the Recycle Bin (never permanent delete).",
              {"action": {"type": "string", "enum": ["open", "move", "recycle"]},
@@ -366,4 +367,4 @@ def tools(ctx: ToolContext) -> list[Tool]:
              confirm_text=lambda a: (f"move {_name(a)} to {a.get('destination')}" if a.get("action") == "move"
                                      else f"send {_name(a)} to the Recycle Bin")),
     ] + ([Tool("undo_move", "Move the file MARY just moved back where it was.", {}, [], undo_move,
-               announce=lambda a: "Moving it back…")] if new_mode else [])
+               watch=False, announce=lambda a: "Moving it back…")] if new_mode else [])

@@ -44,7 +44,9 @@ if errorlevel 1 goto :fail
 echo.
 echo Done. Start MARY with run.bat (voice; press Ctrl+Space and speak), or "run.bat --text" to type.
 echo To have her start whenever you sign in:  .venv\Scripts\python.exe -m mary.autostart enable
-pause
+echo.
+choice /c YN /n /m "Open her settings page now, to pick her persona, voice and brain? [Y/N] "
+if not errorlevel 2 start "MARY settings" ".venv\Scripts\python.exe" -m mary.settings
 exit /b 0
 
 :fail

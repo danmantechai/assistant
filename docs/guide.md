@@ -33,6 +33,22 @@ Everything MARY does, how to use it, and what was measured along the way (on the
 - **Quitting frees the model's RAM** (~2.2 GB), so the next start loads it again (~40 s; MARY greets you
   once it's ready). Set `llm.unload_on_quit: false` to keep it loaded for quick restarts.
 
+## Code first, the screen only when code can't
+
+MARY does a task the most exact way there is, the way a programmer would:
+1. **Code:** a direct request for data (the weather), Windows' own APIs (volume, apps, files), a PowerShell
+   command for anything else a command can do, and `calculate` for numbers. Exact, quick, and short to report.
+2. **The screen, only where code can't reach or where something has to be seen:**
+   - web pages and web apps with no API (WhatsApp Web, YouTube) in **MARY's own browser**: your installed Edge,
+     driven by Playwright, with its own profile in `data/browser/`. Pages are read and clicked through their own
+     structure, never pixels, and your mouse doesn't move. `web.own_browser: false` uses your default browser
+     instead.
+   - desktop apps with no interface for code (Spotify) through UI Automation, read by layout
+   - how something looks, or what a photo shows: `look`, with a model that can see
+   - Windows' OCR fills in what an app doesn't expose.
+
+The same rule is in `docs/skills.md` for anyone writing a skill.
+
 ## Acting on the screen (any app or web page)
 Say it the way you'd tell a person:
 - "**click** subscribe", "press the play button", "click on the Downloads folder", "pick the one where it
@@ -51,6 +67,20 @@ action (no mouse movement), or a real click in its middle with the pointer put b
 - Apps that describe nothing, like Spotify, games and some canvas apps, fall back to reading the window's
   text.
 
+**Waiting for slow apps and pages.** Every action goes through one feedback loop (`mary/ready.py`), so nothing
+depends on guessed pauses:
+- **Before acting**, the window MARY types into, clicks in or reads is ready first.
+- **After acting**, she watches what changed (a new window, a page loading, a dialog) until it has settled.
+  "Settled" means it responds, its title has stopped changing, and a tiny picture of it has stopped changing; a
+  video counts once its title is steady.
+- **"Not yet":** if what she needs isn't there yet (Spotify's search box, the search results), she tries again
+  while the app is still starting or the screen still changing. On a screen that's steady, she stops.
+- **Past about 6 s** she says "Spotify's still starting…".
+- **If something still isn't ready at its limit,** she says so, and can wait longer (the `wait` skill) instead of
+  trying another way.
+- **The limits are learned:** each app gets about 1.5× its usual slow start, from 8 to 45 s; 20 s for an app she
+  hasn't seen yet. The timings are kept in `logs/ready.jsonl`.
+
 Safety:
 - Clicking anything labelled like *buy, pay, order, delete, remove, send, submit, post, confirm, accept,
   sign out, unsubscribe…* asks "Shall I go ahead?" first.
@@ -64,10 +94,8 @@ Safety:
 - **She starts when she's fully ready.** Voice mode loads the language model first (~1 minute, up to ~2 after
   a restart), then greets you by name ("Good morning, Sam. I'm ready when you are."). The name comes
   from `name` in `user/profile.yaml`.
-- **Weather:** "what's the weather", "is it raining", "how hot is it in Paris". MARY opens a one-line
-  weather page (wttr.in) in your browser and reads it off the screen: about 1.5–3 s, in one reused tab.
-  She only reports a reading once the address bar shows the page she asked for, and drops misreads.
-  Forecasts ("tomorrow") are opened for you to see, because only the current weather can be read reliably.
+- **Weather:** "what's the weather", "is it raining", "will it rain tomorrow in Paris". MARY asks wttr.in for
+  the numbers directly (a plain request; no window opens), now and for the next three days.
   `weather.place` in `config.yaml` sets the place (empty = the site guesses from your connection).
 - **No invented facts.** Tools say exactly what they did ("I've opened a search for … in your browser",
   not "here's what I found"). When you ask "what did you find?" right after she opened a page, MARY reads
@@ -93,6 +121,15 @@ Say:
 The facts go into `user/profile.yaml`, in your own words. You can edit it by hand too (MARY reads
 it when she starts). It never leaves this PC. "Remember to call Mum at five" is a reminder rather than a
 fact, so it goes to the model. "Forget it" means "never mind" and never deletes a memory.
+
+**What she learns, and the diary (Memory v2).** Besides what you tell her to remember, MARY keeps a diary (one line
+for each thing you ask) in `user/memory/`. Ask her about it:
+- "What did we do yesterday?" / "What did I say about Marcus?" / "When is my meeting with the bank?"
+- "**Forget** that…" ends a memory and keeps it with its date; "**delete** it **for good**" removes it (she asks first)
+- Memory › Remembered on the settings page lists the diary by day, the facts she has learned, and lets you search, edit,
+  forget or delete. The same memories are plain text in `user/memory/` (`facts.md`, `diary/`): edit them in Notepad.
+- Switch on "Learn from our conversations in the background" there to let her write down lasting facts while you're
+  away (with a cloud model, what you said is sent to it for that).
 
 Speed: remembering or forgetting is instant (the router handles it). MARY sends the profile to the model as
 a short note right after its cached instructions. A change therefore costs one short re-read: the next
@@ -199,6 +236,11 @@ Notes:
   ~0.25 s of speech, and segments Whisper itself marks as probably silent.
 
 ## Wake word: "Hey Mary" or "Hey Mom"
+**Any phrase works.** The settings page (Wake word) records and trains your own phrase in the browser, and offers
+ready-made ones (Hey Jarvis, Alexa, Hey Mycroft, Hey Rhasspy) that need no training. From the command line:
+`record --phrase "Hey Gran"`, then `train --phrase "Hey Gran" --enable`. The rest of this section is how the two
+original phrases were built and measured.
+
 Say either one (or "Hey Mum") instead of pressing Ctrl+Space. Each phrase is its own small model, and
 they run side by side. One model for both phrases woke 48.6 times an hour on other audio, against 1.4 for
 "Hey Mary" alone: the short, common "Hey Mom" blurred what it listened for. They're trained on this PC,
@@ -318,16 +360,28 @@ intent in `intents.yaml`. Embeddings are re-computed automatically when the file
   finds. Then "open it", "open the second one" or "play the video" open a result straight away, without
   the LLM, for 15 minutes after a search. "Open my downloads folder" opens it in File Explorer. Whole
   folders are never moved or recycled.
-- Typing and hotkeys into the focused window, PowerShell (always asks first), and power actions (always ask).
+- Typing and hotkeys into the focused window, and power actions (always ask).
+- **Commands for anything a command can do** ("how big is my Downloads folder", "which apps start with Windows"):
+  MARY writes a PowerShell command. Commands that only look (listing, reading, measuring) run at once; anything
+  that changes something shows the command and asks. PowerShell's own parser decides which is which, from every
+  command in the line (`mary/terminal.py`).
+- **Exact numbers:** sums, percentages, dates and unit conversions are worked out by code (`calculate`), never in
+  the model's head.
 - **Skills** (fixed recipes, so the small model only has to pick one):
   - `play_music`: searches Spotify and plays the best-matching result ("play Don Williams", "play some
     country music"). It checks that the track actually changed, and falls back to YouTube if Spotify can't.
-  - `check_messages`: reads WhatsApp Web's chat list and says how many chats are unread and from whom.
-    It uses WhatsApp's own "Unread" filter for a moment, then switches back to "All". It never opens
-    a chat, so nothing is marked as read. Message text is read only when you ask ("what did Mum say?").
-    Chat names are kept out of the log file.
-  - `read_screen`: the text of a window (UI Automation, or Windows' built-in OCR for web pages), so you can
-    ask about what's on screen.
+  - `check_messages`: WhatsApp Web in MARY's own browser, read from the page itself: the chat list, unread
+    badges by their names ("2 unread messages"), and, only when you ask ("what did Mum say?"), that one chat,
+    opened by its name, with who wrote what. The first time, scan its QR code in MARY's browser window once
+    (WhatsApp › Linked devices). Chat names and messages are kept out of the log file.
+  - `read_screen`: what a window shows, **by layout** (`mary/page.py`): its areas (a top bar, side panels, the
+    main area) are found from the dividers in the window's picture, and each is read top to bottom. The area
+    you're working in, or the one you ask about, is read in full; the others in a line each. In a chat, your
+    lines are marked → and theirs ←. Names and places come from UI Automation, and anything it leaves out from
+    the window's picture (OCR); pages in MARY's browser are read from the page itself.
+  - `look`: what something *looks* like, or what a photo shows, by a model that can see (`mary/vision.py`):
+    `vision.model`, else the brain if it can see, else the smallest model on this PC that can (35 s on this
+    CPU).
 - Compound requests ("open my browser and open WhatsApp and see if I have messages") are split into parts
   and done one by one, because a 4B model tends to stop after the first step.
 
@@ -386,6 +440,23 @@ need the model take ~2–7 s, and a "think carefully" answer ~25–55 s. MARY pr
 Ollama's cache while you're idle, so the next request doesn't re-read what the router handled.
 
 ## Choosing the language model
+
+The settings page's **Model** page picks where MARY's brain runs, and **Test** asks the chosen model to say hello
+before you save:
+
+| Where it runs | What it is | Set in config |
+|---|---|---|
+| **On this PC** | a model Ollama runs here. Free and private; speed depends on your PC. Add more by name (Download). | `llm.model: qwen3.5:2b-q4_K_M` |
+| **Ollama Cloud** | a large model on ollama.com, through your own Ollama (`beam:cloud`, `gpt-oss:120b-cloud`…). Fast. Needs a free ollama.com account: run `ollama signin` once. | `llm.model: beam:cloud` |
+| **Another service** | anything that speaks the OpenAI chat API: OpenAI, OpenRouter, Groq, or a server on this PC such as LM Studio. The key goes in `.env` as `LLM_API_KEY`. | `brain.provider: api`, `brain.api.url`, `brain.api.model` |
+
+With a cloud model or a service, what you say, and what MARY reads on your screen to answer, is sent there (see
+[privacy](privacy.md)). MARY then skips what only helps a model on this PC: pre-reading the conversation between
+requests, the output cap and unloading on quit. **How hard to think** (`llm.think_level`: low, medium, high) is
+what "thinking" means for models that offer levels; beam's own default is its highest, far slower than a spoken
+reply needs.
+
+To compare models on this PC:
 ```bash
 .venv\Scripts\python.exe -m mary.llm.bench qwen3.5:2b-q4_K_M qwen3:4b-q4_K_M
 ```
@@ -430,7 +501,8 @@ Text-mode commands: `/stats` (RAM), `/think <request>`, `/apps <name>` (test app
   now refused, and MARY asks you to say it again. The model can't decide on its own to close something.
   In testing it once tried to force-quit Edge while asked to check WhatsApp. An unasked-for "force" is
   quietly downgraded to a normal close, which still asks first for browsers and editors.
-- PowerShell commands matching the blocklist in `config.yaml` (disk formatting, deletes, registry
+- PowerShell commands that only look run at once; the rest ask. Commands matching the blocklist in
+  `config.yaml` (disk formatting, deletes, registry
   edits, Defender/firewall changes, encoded commands, download-and-run…) are refused even if you say yes.
 - **In the new mode** she asks only when there's a real reason, and says it ("Notepad may have unsaved work.
   Close it anyway?"). Otherwise:
@@ -438,7 +510,8 @@ Text-mode commands: `/stats` (RAM), `/think <request>`, `/apps <name>` (test app
     seconds. Say stop to cancel." Saying "stop" cancels it. Signing out still asks, because it closes every app.
   - Moving a file you named just happens, and "undo" moves it back for 10 minutes afterwards.
   - Recycling a file you named just happens; it's in the Recycle Bin if you want it back.
-  - PowerShell and long typing still always ask, and folders are never moved or recycled.
+  - PowerShell commands that change something and long typing still always ask, and folders are never moved
+    or recycled.
   - When an action she tried is refused because you didn't ask for it, her reply is still hers: asked "I'm
     not feeling well", the 2B tried to put the PC to sleep (refused), then asked what was bothering you.
 
@@ -456,7 +529,45 @@ Text-mode commands: `/stats` (RAM), `/think <request>`, `/apps <name>` (test app
 
 ## Settings
 
-`config.yaml` holds every setting with its default and an explanation: model, context size, sampling, app
+**The settings page:** right-click MARY's tray icon › **Settings…**, or double-click `settings.bat` when she
+isn't running (`python -m mary.settings`). It opens http://127.0.0.1:8765 in your browser.
+
+The persona switcher at the top left picks which persona Identity, Personality, Stories, Voice and
+Wake word edit. Its menu also holds
+New persona, Import a character card, and the persona's own actions: show the prompt, export it as a character card,
+duplicate, remove.
+
+| Group | Page | What's on it |
+|---|---|---|
+| **Memory** | Identity | the persona's name, nicknames, greeting with a preview, wake responses, and **real messages** they wrote (import any .txt or chat export), shown as examples whenever MARY writes |
+| | Personality | starting points, who they are (including how they write), speaking style |
+| | About you | your name; **about you**, in your own words (a text box every persona keeps in mind); **memories**, one per line ("remember that…" and "forget that…" change them too) |
+| | Stories | the persona's stories, each brought up by its keywords |
+| | Remembered | the diary by day, the facts she has learned (forget, edit, delete for good), search, and the switches for what she keeps |
+| | Photos | add folders of photos (nothing is read before you do), see how far the reading has got, browse by year, month, place, folder or the words in a photo, fix a date or place for one photo or a whole album, remove a photo or folder from her records (the originals are never touched). See [photos.md](photos.md) |
+| | People | name the groups of faces she finds, answer "Is this Ama?", join, split or set aside groups, delete a person for good. See [people.md](people.md) |
+| **General** | Voice | the persona's voice: a gallery with play buttons, Kokoro on this PC (female and male) or your ElevenLabs voices; speed, backup voice |
+| | Wake word | the persona's wake phrases: ready-made ones, or your own, recorded and trained in the browser |
+| | Listening | wake word on/off, the hotkey (press it to set it), microphone and noise reduction, speech recognition, custom vocabulary, follow-up listening |
+| | Model | where the brain runs (on this PC, Ollama Cloud, or another service), the model, Test, adding a model, thinking and how hard |
+| | Skills | each ability, grouped, as a switch |
+| | Connections | ElevenLabs (key, credits), Ollama, a model service |
+
+Two settings are only in the file, since their defaults suit almost everyone: `weather.place` (empty: the weather
+site goes by your connection) and `llm.history_reset_minutes` (a conversation is remembered for 15 minutes).
+
+How it works:
+- It saves into the same files as below, keeping their comments. The previous version of each file goes to
+  `user/backups/` (the last 5).
+- A persona that ships with MARY is never changed: your first edit makes your private copy in
+  `user/personas/`.
+- **Restart MARY** (on the page) applies the changes. The model stays loaded, so she's back in seconds.
+  - Edits on About you apply at once.
+  - Restarting works when she was started by `run.bat`, or in the background. Otherwise, start her again yourself.
+- The page only answers this PC, and refuses requests made by other websites. Keys are written to `.env` and
+  never shown again.
+
+**By hand:** `config.yaml` holds every setting with its default and an explanation: model, context size, sampling, app
 aliases ("vs code" → "Visual Studio Code"), known websites, search engine, folders, safety lists, PowerShell
 blocklist. Put your own changes in `user/config.yaml` (created for you, private): it's merged over
 `config.yaml`, so you only list what you change.

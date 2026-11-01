@@ -2,6 +2,9 @@
 
     python -m mary.wakeword_training.record            the full session
     python -m mary.wakeword_training.record --more     add another round of "Hey Mary" takes
+    python -m mary.wakeword_training.record --phrase "Hey Grandma"   any other wake phrase (--more works too)
+
+The settings page does the same in your browser (Wake word › Train).
 
 Synthetic voices alone teach a wake word poorly (one 2026 trainer measured ~8% recall on a real voice
 from synthetic-only data vs ~90% once real recordings were added), so your recordings matter most.
@@ -16,6 +19,7 @@ import time
 import numpy as np
 
 from mary.config import expand_path, load_config
+from mary.wakeword_training import phrases
 from mary.wakeword_training.audio_io import RATE, save_wav, usable_take
 
 POSITIVE_STYLES = [
@@ -29,9 +33,7 @@ MOM_STYLES = [("your normal voice, the way you'd say it (Mom or Mum)", 8), ("a b
 NEAR_MISSES = ["Mary", "Hey", "Hey Larry", "Hey Barry", "Marry me", "Hey Siri", "Hey Maria", "Merry Christmas",
                "Hey Mark", "Very nice", "Hey man", "Okay Mary", "Hey, may I ask", "Hairy", "Hey Gary",
                "Mum", "I'll call my mum later", "Hey Tom"]
-READ_ALOUD = ("Read this out in your normal voice: Yesterday I went to the market with my sister. We bought "
-              "tomatoes, onions, fresh fish and a bag of rice, then stopped for tea before the rain started. "
-              "In the evening we watched the news, talked about work, and planned the weekend.")
+READ_ALOUD = "Read this out in your normal voice: " + phrases.READ_ALOUD
 
 
 def beep() -> None:
@@ -95,6 +97,7 @@ def record_takes(prompt: str, count: int, folder, prefix: str, device, seconds: 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="python -m mary.wakeword_training.record")
     parser.add_argument("--more", action="store_true", help="only record another round of both phrases")
+    parser.add_argument("--phrase", help='record one wake phrase, e.g. "Hey Grandma" (default: Hey Mary and Hey Mom)')
     args = parser.parse_args()
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     cfg = load_config()
@@ -104,6 +107,8 @@ def main() -> None:
 
     vad_model = expand_path(cfg.paths.data) / "models" / "silero" / "silero_vad.onnx"
     vad = SileroVAD(vad_model) if vad_model.exists() else None  # checks each take holds the words
+    if args.phrase:
+        return record_phrase(phrases.spec(args.phrase), root, device, vad, args.more)
 
     print("Recording for your wake words, \"Hey Mary\" and \"Hey Mom\". Start speaking right after each beep;")
     print("if a take didn't catch the words, it asks again. Each new way of saying it waits for Enter.")
@@ -143,6 +148,36 @@ def main() -> None:
     print(f"\nAll done: {positives} wake-word takes. Now train both (10-20 minutes each) and switch them on:")
     print("   python -m mary.wakeword_training.train --enable")
     print("   python -m mary.wakeword_training.train --phrase mom --enable")
+
+
+def record_phrase(spec: dict, root, device, vad, more: bool = False) -> None:
+    """One wake phrase: its takes in several ways, its sound-alikes, and the shared speech and room recordings
+    if they aren't there yet."""
+    name = spec["name"]
+    print(f"Recording \"{name}\". Start speaking right after each beep; if a take didn't catch the words, it asks")
+    print("again. Each new way of saying it waits for Enter. Ctrl+C stops; what's recorded so far is kept.\n")
+    input("Press Enter when you're ready… ")
+    print(f"\n1) \"{name}\", in different ways")
+    for style, count in spec["styles"][:1] if more else spec["styles"]:
+        start(style)
+        record_takes(name, count * (2 if more else 1), root / "positive", spec["takes"], device, vad=vad)
+    if not more:
+        print("\n2) Things that sound a bit like it, but must NOT wake MARY. Say exactly the words shown.")
+        input("   Press Enter to start… ")
+        for phrase in spec["near"]:
+            record_takes(phrase, 1, root / "negative", "near_miss", device, lead=1.2, vad=vad, whole=False)
+        if not list((root / "negative").glob("speech_*.wav")):
+            print(f"\n3) {READ_ALOUD}")
+            input("   Press Enter, then read for ~25 seconds… ")
+            beep()
+            save_wav(root / "negative" / "speech_001.wav", take(25, device))
+        if not list((root / "negative").glob("room_*.wav")):
+            print("\n4) Your room's normal sound: stay quiet, or type, or have the TV on (20 seconds)")
+            input("   Press Enter to start… ")
+            beep()
+            save_wav(root / "negative" / "room_001.wav", take(20, device))
+    print("\nDone. Now train it (10-20 minutes) and switch it on:")
+    print(f"   python -m mary.wakeword_training.train --phrase \"{name}\" --enable")
 
 
 if __name__ == "__main__":

@@ -41,6 +41,6 @@ def tools(ctx: ToolContext) -> list[Tool]:
         Tool("set_timer", "Start a countdown timer that alerts when done.",
              {"duration": {"type": "string", "description": "e.g. '5 minutes', '90 seconds', '1h30m'"},
               "label": {"type": "string", "description": "optional, e.g. 'pasta'"}},
-             ["duration"], set_timer, speaks_for_itself=True,
+             ["duration"], set_timer, speaks_for_itself=True, watch=False,
              announce=lambda a: f"Setting a {a.get('duration', '')} timer…"),
     ]

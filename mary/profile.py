@@ -1,4 +1,5 @@
-"""What MARY remembers about you: user/profile.yaml (your name and facts you asked her to keep).
+"""What MARY remembers about you: user/profile.yaml (your name, what you wrote about yourself on the settings page,
+and facts you asked her to keep).
 
 The agent sends the profile as a pinned first exchange right after its cached prefix, in your own
 words, so a change costs one short re-read and ordinary requests cost nothing extra.
@@ -9,6 +10,7 @@ import os
 import re
 import shutil
 import threading
+from datetime import date
 from pathlib import Path
 
 import yaml
@@ -50,10 +52,15 @@ class Profile:
         if self.path.exists():
             data = yaml.safe_load(self.path.read_text(encoding="utf-8")) or {}
         self.name: str = str(data.get("name") or "").strip()
+        self.about: str = str(data.get("about") or "").strip()   # in your own words (the settings page)
         self.facts: list[str] = [str(f).strip() for f in data.get("facts") or [] if str(f).strip()]
+        # What she was asked to forget: kept with the date, never silently lost (older MARYs ignore this key).
+        self.ended: list[dict] = [e for e in data.get("ended") or [] if isinstance(e, dict) and e.get("fact")]
 
     def _save(self) -> None:
-        body = yaml.safe_dump({"name": self.name, "facts": self.facts}, allow_unicode=True, sort_keys=False)
+        data = {"name": self.name, **({"about": self.about} if self.about else {}), "facts": self.facts,
+                **({"ended": self.ended} if self.ended else {})}
+        body = yaml.safe_dump(data, allow_unicode=True, sort_keys=False, width=110)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(_HEADER + body, encoding="utf-8")
         for listener in self.listeners:
@@ -87,8 +94,29 @@ class Profile:
             if not best or best[1] < 60:
                 return None
             self.facts.pop(candidates[best[2]])
+            self.ended.append({"fact": best[0], "ended": date.today().isoformat(), "why": "forgotten"})
             self._save()
             return best[0]
+
+    def forget_exact(self, fact: str, why: str = "forgotten") -> bool:
+        """End this very fact (the memory store found which one was meant). False if it isn't there."""
+        with self._lock:
+            if fact not in self.facts:
+                return False
+            self.facts.remove(fact)
+            self.ended.append({"fact": fact, "ended": date.today().isoformat(), "why": why})
+            self._save()
+            return True
+
+    def erase(self, fact: str) -> bool:
+        """Remove a fact and every trace of it here: the fact, and its line in what was forgotten."""
+        with self._lock:
+            had = fact in self.facts or any(e["fact"] == fact for e in self.ended)
+            self.facts = [f for f in self.facts if f != fact]
+            self.ended = [e for e in self.ended if e["fact"] != fact]
+            if had:
+                self._save()
+            return had
 
     def set_name(self, name: str) -> None:
         with self._lock:
@@ -101,7 +129,13 @@ class Profile:
         if self.name:
             lines.append(f"- Call me {self.name} (now and then, not in every reply).")
         lines += [f"- {fact}" for fact in self.facts]
-        if not lines:
+        if not lines and not self.about:
             return ""
-        return ("Background, not a request. Things I asked you to remember about me; use them when they're "
-                "relevant (for example which browser or music I prefer):\n" + "\n".join(lines))
+        out = "Background, not a request."
+        if self.about:
+            out += f" About me, in my own words: {self.about}\n"
+        if lines:
+            out += ("" if self.about else " ") + ("Things I asked you to remember about me; use them when they're "
+                                                  "relevant (for example which browser or music I prefer):\n"
+                                                  + "\n".join(lines))
+        return out.rstrip()

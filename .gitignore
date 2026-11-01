@@ -10,3 +10,5 @@ __pycache__/
 /user/
 # Where an older MARY kept your profile (it now lives in user/)
 /profile.yaml
+# This PC's preview servers for the Claude app (full paths of this PC)
+/.claude/launch.json

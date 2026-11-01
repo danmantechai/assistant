@@ -60,23 +60,6 @@ def _running_targets(ctx: ToolContext, name: str) -> tuple[str, list[winutil.Win
     return label, [w for s, w in scored if w.exe == best.exe and s >= best_score - 15]
 
 
-def _wait_for_window(app, before: set[int], timeout: float = 6.0) -> winutil.WindowInfo | None:
-    """Wait until the launched app has a window, then focus it, so a following "type …" lands in
-    the new app rather than in whatever was in front before."""
-    name = app.name.lower()
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        fg = winutil.foreground_window()
-        for w in winutil.list_windows():
-            ours = (app.exe and w.exe == app.exe) or name in w.title.lower() or \
-                fuzz.partial_ratio(name, w.title.lower()) >= 90
-            if ours and (w.hwnd not in before or (fg and fg.hwnd == w.hwnd)):
-                winutil.focus_window(w.hwnd)
-                return w
-        time.sleep(0.2)
-    return None
-
-
 def tools(ctx: ToolContext) -> list[Tool]:
     safety = ctx.cfg.safety
 
@@ -97,13 +80,11 @@ def tools(ctx: ToolContext) -> list[Tool]:
                                          "Ask the user which one.")
             hint = f" Closest: {', '.join(match.candidates)}." if match.candidates else ""
             return ToolResult(False, f"No installed app matches '{name}'.{hint}")
-        before = {w.hwnd for w in winutil.list_windows()}
         ctx.apps.launch(match.app)
-        window = _wait_for_window(match.app, before)
-        if window:
-            ctx.last_launch = (window.hwnd, time.monotonic())  # so typing waits until it's really ready
-        ready = f" Its window is open and focused: {window.title}." if window else ""
-        return ToolResult(True, f"Launched {match.app.name}.{ready}", say=f"Opening {match.app.name}.")
+        # The feedback loop (mary/ready.py) waits for its window, brings it to the front and lets it finish
+        # loading, then says which it is: ready, or still starting.
+        return ToolResult(True, f"Launched {match.app.name}.", say=f"Opening {match.app.name}.",
+                          waits_for=match.app.exe or match.app.name)
 
     def close_app(name: str, force: bool = False) -> ToolResult:
         label, windows = _running_targets(ctx, name)
@@ -142,7 +123,7 @@ def tools(ctx: ToolContext) -> list[Tool]:
         Tool("close_app", "Close a running application's windows (politely, so it can ask to save).",
              {"name": {"type": "string", "description": "app name or window title"},
               "force": {"type": "boolean", "description": "kill the process; only if the user insists"}},
-             ["name"], close_app, tier=close_tier, speaks_for_itself=True,
+             ["name"], close_app, tier=close_tier, speaks_for_itself=True, watch=False,  # waits for it itself
              announce=lambda a: f"Closing {a.get('name', 'app')}…",
              confirm_text=lambda a: f"{'force-quit' if a.get('force') else 'close'} {a.get('name')}, "
                                     "which may have unsaved work",

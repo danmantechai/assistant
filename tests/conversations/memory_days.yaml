@@ -1,0 +1,29 @@
+# Told on one day, asked on another. Her memory tool runs for real on a scratch profile and an empty scratch memory (the
+# other tools are faked, as always); `day: 1` lets a day pass. Nothing here is real: invented people and plans.
+name: Memory across days (told on Monday, asked later)
+real: [memory]
+turns:
+  - user: "Remember that my sister's name is Lena."
+    expect: {tools: [memory]}
+  - user: "Remember that I live in Lisbon."
+    expect: {tools: [memory]}
+  - user: "My meeting with the bank is on Thursday at 3:30."
+    expect: {avoid: [web, open_app]}
+  - day: 1
+    user: "What did we do yesterday?"
+    expect: {mentions: ["bank|sister|Lisbon|Lena|remember"], avoid: [web, open_app, find_files]}
+  - user: "When is my meeting with the bank?"
+    expect: {mentions: ["Thursday", "3[:.]30"]}
+  - day: 1
+    user: "Remember that I live in Porto now."
+    expect: {tools: [memory]}
+  - user: "Where do I live?"
+    expect: {mentions: ["Porto"], lacks: ["Lisbon"], talk: true}
+  - user: "What's my sister's name?"
+    expect: {mentions: ["Lena"], talk: true}
+  - user: "Forget that I live in Porto."
+    expect: {tools: [memory]}
+  - user: "Delete my sister's name for good."
+    expect: {tools: [memory]}
+  - user: "What's my sister's name?"
+    expect: {lacks: ["Lena"]}

@@ -1,36 +1,43 @@
-"""check_weather: open a one-line weather page (wttr.in) in the browser and read it off the screen with OCR.
+"""check_weather: the weather now, today, tomorrow or for the next days, from wttr.in's JSON (?format=j1): a plain GET
+through mary/net.py, with no browser and nothing read off the screen.
 
-The page is plain text ("Lisbon: Patchy rain nearby, +28°C, feels +32°C, humidity 75%"), which Windows
-OCR reads reliably, except the degree sign: it comes back as "0" or "•" ("+280 C"). The page always
-prints one, so the last character before "C" is dropped when it looks like one.
-
-Only the current weather can be read this way. For a forecast the full page is opened for you to see,
-and MARY says so instead of guessing.
+wttr.in gives the current conditions and three days (today, tomorrow, the day after) in 3-hour steps. A day is
+summed up as its low and high, the condition seen most over the daytime, and its highest chance of rain or snow and
+when. Readings are cached for 10 minutes. The place is said only when one was named (for your own location the
+site's area name, e.g. a district, gets in the way).
 """
 from __future__ import annotations
 
 import logging
-import os
 import re
-import time
+from collections import Counter
 from dataclasses import dataclass
+from datetime import date, timedelta
 from urllib.parse import quote
 
-from mary import winutil
-from mary.ocr import OcrLine, capture_window, ocr_pixels
-from mary.skills._browser import browser_window, select_tab
+from mary import net
 from mary.tools.registry import Tool, ToolContext, ToolResult
 
-GUIDE = "The weather or temperature: check_weather. Answer from its result; never guess the weather."
+GUIDE = ("The weather, now or for today, tomorrow or the next few days: check_weather. Answer from its result; never "
+         "guess the weather.")
 SLOW = {"check_weather": ["Let me check the weather.", "One moment, checking the weather."]}
 
 log = logging.getLogger(__name__)
 
-FORMAT = "%l: %C, %t, feels %f, humidity %h"
+URL = "https://wttr.in/{place}"
+TTL_S = 600
+WHEN = ["now", "today", "tomorrow", "forecast"]
 _FORECAST_WORDS = re.compile(r"\b(tomorrow|tonight|later|weekend|next|week|forecast|going to|will it)\b", re.I)
-# "+28°C" comes back as "+280 C", "+32 0 C", "+32 •C" or "+15 oc": digits, maybe the degree sign, then C.
-_TEMP = re.compile(r"([+-]?)(\d{1,3})\s*([0oO°º•]?)\s*[Cc]\b")
-_last_url: str | None = None  # the page MARY opened last, so its tab can be refreshed instead of reopened
+_WHEN_WORDS = [  # the user's own words, when they say more than the call does
+    ("tomorrow", re.compile(r"\btomorrow\b", re.I)),
+    ("forecast", re.compile(r"\b(weekend|week|forecast|next (few |couple of )?days|coming days|days ahead)\b", re.I)),
+    ("today", re.compile(r"\b(today|tonight|later|this (morning|afternoon|evening))\b", re.I)),
+]
+_WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+_PART_OF_DAY = {0: "overnight", 300: "overnight", 600: "in the morning", 900: "in the morning",
+                1200: "in the afternoon", 1500: "in the afternoon", 1800: "in the evening", 2100: "in the evening"}
+_DAYTIME = {900: 1.0, 1200: 1.5, 1500: 1.0, 1800: 1.0}  # noon breaks a tie
+_WORTH_SAYING = 30  # a chance of rain or snow (%) worth saying out loud
 
 
 @dataclass
@@ -40,142 +47,182 @@ class Weather:
     temp: int
     feels: int | None
     humidity: int | None
+    wind_kmh: int | None = None
 
 
-def _degrees(sign: str, digits: str, degree: str) -> int:
-    if not degree and len(digits) >= 2 and digits.endswith("0"):
-        digits = digits[:-1]  # "+280 C": the "0" is the degree sign
-    return int(sign + digits) if sign == "-" else int(digits)
+@dataclass
+class Day:
+    date: date
+    low: int
+    high: int
+    condition: str
+    rain: int                 # highest chance of rain over the day, %
+    rain_when: str            # "in the afternoon"
+    snow: int = 0
+    snow_when: str = ""
 
 
-def rows(lines: list[OcrLine]) -> str:
-    """OCR splits one printed line into pieces ("Paris: Light rain shower," | "+240 C, feels…" |
-    "humidity 70%"); put the pieces that sit on the same row back together, left to right."""
-    out: list[list[OcrLine]] = []
-    for line in sorted(lines, key=lambda l: l.cy):
-        if out and abs(out[-1][0].cy - line.cy) < max(6.0, out[-1][0].h * 0.6):
-            out[-1].append(line)
-        else:
-            out.append([line])
-    return "\n".join(" ".join(l.text for l in sorted(row, key=lambda l: l.x)) for row in out)
+def _text(field) -> str:
+    """wttr.in wraps text as [{"value": "Partly Cloudy "}]: 'Partly cloudy'."""
+    value = (field[0]["value"] if isinstance(field, list) and field else str(field or "")).strip()
+    return value[:1].upper() + value[1:].lower()
 
 
-def parse(text: str) -> Weather | None:
-    """The weather from the page's OCR text, or None if it isn't readable (yet). Only the line holding
-    the reading counts: the rest of the window (tabs, favourites, address bar) is noise."""
-    for line in text.splitlines():
-        if "format=" in line or "wttr.in" in line:
-            continue
-        head = re.search(r"([^:]{2,80}):\s*([^,]{2,60}),\s*[+-]?\d", line)
-        temps = list(_TEMP.finditer(line))
-        if not head or not temps:
-            continue
-        temp = _degrees(*temps[0].groups())
-        feels = _degrees(*temps[1].groups()) if len(temps) > 1 else None
-        if not -40 <= temp <= 55 or (feels is not None and abs(feels - temp) > 15):
-            return None  # a misread; better to say so than to say something wrong
-        humidity = re.search(r"hum\s*i\s*dity\s*(\d{1,3})\s*%", line, re.I)
-        return Weather(head.group(1).strip(), head.group(2).strip(), temp, feels,
-                       int(humidity.group(1)) if humidity else None)
-    return None
+def _int(value) -> int | None:
+    try:
+        return round(float(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def area(data: dict) -> str:
+    """'Alcantara, Portugal': the place the reading is for."""
+    near = (data.get("nearest_area") or [{}])[0]
+    return ", ".join(part for part in (_text(near.get("areaName")).title(), _text(near.get("country")).title())
+                     if part)
+
+
+def current(data: dict) -> Weather:
+    now = data["current_condition"][0]
+    temp = _int(now["temp_C"])
+    if temp is None:
+        raise ValueError("no temperature in the reading")
+    return Weather(area(data), _text(now.get("weatherDesc")), temp, _int(now.get("FeelsLikeC")),
+                   _int(now.get("humidity")), _int(now.get("windspeedKmph")))
+
+
+def _peak(hours: list[dict], key: str) -> tuple[int, str]:
+    best = max(hours, key=lambda h: _int(h.get(key)) or 0, default=None)
+    if best is None:
+        return 0, ""
+    return _int(best.get(key)) or 0, _PART_OF_DAY.get(_int(best.get("time")) or 0, "")
+
+
+def days(data: dict) -> list[Day]:
+    out = []
+    for d in data.get("weather") or []:
+        hours = d.get("hourly") or []
+        seen: Counter = Counter()
+        for h in hours:
+            weight = _DAYTIME.get(_int(h.get("time")) or 0)
+            if weight:
+                seen[_text(h.get("weatherDesc"))] += weight
+        condition = seen.most_common(1)[0][0] if seen else _text((hours or [{}])[len(hours) // 2].get("weatherDesc"))
+        rain, rain_when = _peak(hours, "chanceofrain")
+        snow, snow_when = _peak(hours, "chanceofsnow")
+        out.append(Day(date.fromisoformat(d["date"]), _int(d["mintempC"]), _int(d["maxtempC"]), condition,
+                       rain, rain_when, snow, snow_when))
+    return out
 
 
 def spoken(w: Weather, place: str = "") -> str:
-    """'It's 28 degrees, feeling like 32. Patchy rain nearby.' The condition gets its own sentence, since
-    the site's wording ("Mist", "Light rain shower") doesn't fit "and …". The place is said only when you
-    named one (for your own location the site's region name, e.g. "Greater London, GB", gets in the way)."""
+    """'It's 28 degrees, feeling like 32. Patchy rain nearby.' The condition gets its own sentence, since the
+    site's wording ("Mist", "Light rain shower") doesn't fit "and …"."""
     feels = f", feeling like {w.feels}" if w.feels is not None and w.feels != w.temp else ""
     where = f"In {place.strip().title()} it's" if place else "It's"
     condition = w.condition[:1].upper() + w.condition[1:]
     return f"{where} {w.temp} degrees{feels}. {condition}."
 
 
-def _reuse_tab(url: str) -> winutil.WindowInfo | None:
-    """Show `url` in the weather tab that's already open (refresh, or point it at another place), so
-    asking about the weather doesn't pile up tabs. None if there's no such tab."""
-    win = browser_window("wttr")
-    if win is None and select_tab("wttr"):
-        time.sleep(0.4)
-        win = browser_window("wttr")
-    if win is None or not winutil.focus_window(win.hwnd):
-        return None
-    time.sleep(0.2)
-
-    def still_there() -> bool:  # keys only ever go to that tab, checked right before each one
-        fg = winutil.foreground_window()
-        return bool(fg and fg.hwnd == win.hwnd and "wttr" in fg.title.lower())
-
-    import pyautogui
-    if not still_there():
-        return None
-    if url == _last_url:
-        pyautogui.press("f5")
-        return win
-    pyautogui.hotkey("ctrl", "l")
-    time.sleep(0.15)
-    if not still_there():
-        return None
-    pyautogui.write(url)
-    pyautogui.press("enter")
-    return win
+def _label(d: Day, first: date) -> str:
+    gap = (d.date - first).days
+    return "Today" if gap == 0 else "Tomorrow" if gap == 1 else f"{d.date:%A}"
 
 
-def _open(url: str) -> winutil.WindowInfo | None:
-    """Show `url` in the browser: in the existing weather tab if there is one, else a new tab."""
-    global _last_url
-    win = _reuse_tab(url)
-    _last_url = url
-    if win:
-        return win
-    os.startfile(url)
-    deadline = time.monotonic() + 15
-    while time.monotonic() < deadline:
-        time.sleep(0.5)
-        win = browser_window("wttr")
-        if win:
-            return win
-    return None
+def _dated(day: date) -> str:
+    return f"{day:%A} {day.day} {day:%B}"
+
+
+def _chance(kind: str, pct: int, when: str) -> str:
+    return f"chance of {kind} up to {pct}%" + (f" {when}" if when else "")
+
+
+def _fact(d: Day, first: date) -> str:
+    """'Tomorrow (Monday 2 November): Sunny, 15 to 25°C, chance of rain up to 4% in the morning.'"""
+    parts = [d.condition, f"{d.low} to {d.high}°C", _chance("rain", d.rain, d.rain_when)]
+    if d.snow:
+        parts.append(_chance("snow", d.snow, d.snow_when))
+    label = _label(d, first)
+    when = f"{label} ({_dated(d.date)})" if label in ("Today", "Tomorrow") else _dated(d.date)
+    return f"{when}: {', '.join(p for p in parts if p)}."
+
+
+def spoken_day(d: Day, first: date) -> str:
+    """'Tomorrow, 15 to 25 degrees, sunny, with a 60% chance of rain in the afternoon.' Only chances worth
+    saying are said."""
+    chances = [f"a {pct}% chance of {kind}" + (f" {when}" if when else "")
+               for kind, pct, when in (("rain", d.rain, d.rain_when), ("snow", d.snow, d.snow_when))
+               if pct >= _WORTH_SAYING]
+    tail = f", with {' and '.join(chances)}" if chances else ""
+    return f"{_label(d, first)}, {d.low} to {d.high} degrees, {d.condition.lower()}{tail}."
+
+
+def wanted(when: str, request: str, ahead: list[Day]) -> str | date:
+    """What was asked for: "now", "today", "tomorrow", "forecast", or a day of the week as its date. The user's
+    own words win when they say more than the call does ("will it rain on Friday?" with when="now")."""
+    words = request or ""
+    for i, day in enumerate(_WEEKDAYS):
+        if ahead and re.search(rf"\b{day}\b", words, re.I):
+            first = ahead[0].date
+            return first + timedelta(days=(i - first.weekday()) % 7)
+    if when not in ("today", "tomorrow"):
+        for name, rx in _WHEN_WORDS:
+            if rx.search(words):
+                return name
+    return when if when in WHEN else "now"
+
+
+def report(data: dict, when: str, request: str = "", place: str = "") -> ToolResult:
+    """The tool's result for a wttr.in reading: short facts for the brain, and a spoken line."""
+    now, ahead = current(data), days(data)
+    asked = wanted(when, request, ahead)
+    named = place.strip().title()
+    where = (f"{named} ({now.place})" if named and named.lower() not in now.place.lower() else now.place or named
+             or "your area")
+    if asked == "now" or not ahead:
+        details = [now.condition, f"{now.temp}°C"]
+        details += [f"feels like {now.feels}°C"] if now.feels is not None else []
+        details += [f"humidity {now.humidity}%"] if now.humidity is not None else []
+        details += [f"wind {now.wind_kmh} km/h"] if now.wind_kmh is not None else []
+        today = (f" Today: {ahead[0].low} to {ahead[0].high}°C, {_chance('rain', ahead[0].rain, ahead[0].rain_when)}."
+                 if ahead else "")
+        return ToolResult(True, f"Weather in {where} now: {', '.join(details)}.{today}", say=spoken(now, place))
+    first = ahead[0].date
+    if asked == "forecast":
+        lines = [f"Forecast for {where}, {len(ahead)} days (as far as it goes):", *(_fact(d, first) for d in ahead)]
+        return ToolResult(True, "\n".join(lines), say=" ".join(spoken_day(d, first) for d in ahead))
+    target = asked if isinstance(asked, date) else first + timedelta(days=1 if asked == "tomorrow" else 0)
+    day = next((d for d in ahead if d.date == target), None)
+    if day is None:
+        last = ahead[-1].date
+        return ToolResult(True, "\n".join([f"The forecast for {where} only goes to {_dated(last)}, so "
+                                           f"{target:%A} isn't in it yet:", *(_fact(d, first) for d in ahead)]),
+                          say=f"The forecast only goes as far as {last:%A}.")
+    return ToolResult(True, f"Weather in {where}. {_fact(day, first)}", say=spoken_day(day, first))
 
 
 def tools(ctx: ToolContext) -> list[Tool]:
     def check_weather(when: str = "now", place: str = "") -> ToolResult:
         place = (place or ctx.cfg.get("weather", {}).get("place") or "").strip()
-        where = quote(place.replace(" ", "+"), safe="+")
-        if when != "now" or _FORECAST_WORDS.search(ctx.request or ""):
-            _open(f"https://wttr.in/{where}?m")
-            return ToolResult(True, "Opened the forecast page in the browser. Forecasts can't be read off the "
-                                    "screen; only the current weather can.",
-                              say="I can only read the current weather so far, so I've opened the forecast "
-                                  "in your browser.")
-        win = _open(f"https://wttr.in/{where}?format={quote(FORMAT)}&m")
-        # Read only once the address bar shows this page: right after opening, the window can still show
-        # the previous one (another place, or the last reading), and that must never be reported.
-        marker = f"wttr.in/{where}?".lower()
-        if win is None:
-            return ToolResult(False, "The weather page didn't open in the browser.",
-                              say="The weather page didn't open. Is the internet connected?")
-        weather, text = None, ""
-        deadline = time.monotonic() + 12  # the page may still be loading
-        while weather is None and time.monotonic() < deadline:
-            time.sleep(0.8)
-            text = rows(ocr_pixels(capture_window(win.hwnd)))
-            if marker in text.lower().replace(" ", ""):
-                weather = parse(text)
-            if re.search(r"unknown location|sorry|not found", text, re.I):
-                break
-        if weather is None:
-            log.info("weather page unreadable: %r", text[:300])
-            return ToolResult(False, "Couldn't read the weather page; it's open in the browser.",
-                              say="I've opened the weather, but I couldn't read it clearly. It's in your browser.")
-        humidity = f", humidity {weather.humidity}%" if weather.humidity is not None else ""
-        return ToolResult(True, f"Weather in {weather.place}: {weather.condition}, {weather.temp}°C, feels like "
-                                f"{weather.feels}°C{humidity}.", say=spoken(weather, place))
+        url = URL.format(place=quote(place.replace(" ", "+"), safe="+~"))
+        try:
+            data = net.get_json(url, params={"format": "j1"}, ttl=TTL_S)
+            return report(data, when, ctx.request, place)
+        except net.NetError as e:
+            if e.status and re.search(r"not found|unknown location", e.body, re.I):
+                return ToolResult(False, f"The weather service doesn't know a place called '{place}'.",
+                                  say=f"I couldn't find a place called {place}.")
+            return ToolResult(False, f"Couldn't get the weather: {e}", say=f"I couldn't get the weather. {e}")
+        except (KeyError, IndexError, TypeError, ValueError, AttributeError) as e:
+            log.warning("unexpected weather data: %r", e)
+            return ToolResult(False, "The weather service sent something unexpected.",
+                              say="I couldn't read the weather just now.")
 
     return [Tool(
         "check_weather",
-        "Current weather (temperature, conditions, humidity) for the user's location or a named place, read "
-        "from a weather page. Forecasts are only opened in the browser.",
-        {"when": {"type": "string", "enum": ["now", "forecast"]},
+        "The weather from a weather service: now (temperature, conditions, humidity, wind), today, tomorrow, or the "
+        "next three days (forecast), for the user's location or a named place.",
+        {"when": {"type": "string", "enum": WHEN},
          "place": {"type": "string", "description": "a city; omit for the user's own location"}},
-        [], check_weather, speaks_for_itself=True, announce=lambda a: "Checking the weather…",
+        [], check_weather, speaks_for_itself=True, watch=False, announce=lambda a: "Checking the weather…",
     )]

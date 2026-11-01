@@ -1,5 +1,6 @@
-"""Conversation polish: filler filtering, "no"/"thanks"/yes-to-an-offer, honest weather readings,
-router hints, and the startup greeting. Everything here runs without the LLM or a browser."""
+"""Conversation polish: filler filtering, "no"/"thanks"/yes-to-an-offer, how the weather is said,
+router hints, and the startup greeting. Everything here runs without the LLM or a browser. (Reading the weather
+itself is in tests/test_net.py.)"""
 import time
 from types import SimpleNamespace
 
@@ -9,7 +10,7 @@ from mary.config import load_config
 from mary.conversation import classify, offer_in
 from mary.llm.replies import CLARIFY, ReplyFilter
 from mary.output import Output
-from mary.skills.weather import Weather, parse, spoken
+from mary.skills.weather import Weather, spoken
 from tests.conftest import needs_router
 
 
@@ -120,23 +121,7 @@ def test_greeting_uses_the_name(mary):
     assert ", Sam. I'm ready when you are." in mary.greeting()
 
 
-# ---------------------------------------------------------------- weather, from real OCR output
-
-@pytest.mark.parametrize("ocr, temp, feels, humidity", [
-    ("Greater London, GB: Patchy rain nearby, +280 C, feels +32 0 C, humidity 75%", 28, 32, 75),
-    ("London: Patchy rain nearby, +15 oc, feels +12 oc, humi dity 94%", 15, 12, 94),
-    ("Paris: Light rain shower, +28°C, feels +32 •C, humidity 70%", 28, 32, 70),
-    ("Oslo: Light snow, -50 C, feels -90 C, humidity 88%", -5, -9, 88),
-])
-def test_weather_parse(ocr, temp, feels, humidity):
-    w = parse("C https://wttr.in/?format=...\n" + ocr)  # the address bar line is ignored
-    assert (w.temp, w.feels, w.humidity) == (temp, feels, humidity)
-
-
-def test_weather_misread_is_not_reported():
-    assert parse("Lisbon: Sunny, +2800 C, feels +32 0 C, humidity 75%") is None  # 280° is not a reading
-    assert parse("Tabs Online video converter | Settings") is None
-
+# ---------------------------------------------------------------- weather, said out loud
 
 def test_weather_spoken():
     w = Weather("Greater London, GB", "Patchy rain nearby", 28, 32, 75)

@@ -1,0 +1,12 @@
+# From real use (28-29 Oct): she called the user "Mom" (his name for her) after a refused action and after a note.
+name: Names (she never calls you by her own name)
+turns:
+  - user: "Can you call Daniel for me?"
+    expect: {avoid: [power, find_files]}
+  - user: "Can you note the following things down for me? I have a meeting at 3.30pm tomorrow."
+    expect: {tools: [create_note]}
+    results:
+      create_note: {text: "Created note Meeting.md.", say: "Noted, in Meeting."}
+  - user: "Good morning, Mom."
+    expect: {talk: true}
+  - user: "Thank you, Mom."

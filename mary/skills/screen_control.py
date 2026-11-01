@@ -111,6 +111,38 @@ def elements(hwnd: int, hidden: bool = False) -> list[Element]:
     return out
 
 
+def _page_areas() -> list[tuple[str, list[Element]]]:
+    """MARY's browser: the page's controls grouped by the page's areas."""
+    from mary import web
+    from mary.page import Item, _rows
+
+    data = web.browser().snapshot()
+    els = [Element(c["role"], c["text"], tuple(c["rect"]), ("page", c["id"])) for c in data["controls"] if c["text"]]
+    page = web.page_from({**data, "texts": [{"text": e.name, "role": e.kind, "rect": e.rect, "clickable": True}
+                                            for e in els]})
+    by_rect = {(e.name, e.rect): e for e in els}
+    return [(r.place, [by_rect[(it.text, it.rect)] for row in _rows(r.items) for it in row
+                       if (it.text, it.rect) in by_rect]) for r in page.regions]
+
+
+def _by_area(win: winutil.WindowInfo, els: list[Element]) -> list[tuple[str, list[Element]]]:
+    """The elements grouped by the window's areas (mary/page.py), each in reading order."""
+    import win32gui
+
+    from mary.ocr import capture_window
+    from mary.page import Item, _rows, dividers, segment
+
+    try:
+        pixels = capture_window(win.hwnd)
+    except Exception:
+        return [("window", els)]
+    left, top = win32gui.GetWindowRect(win.hwnd)[:2]
+    items = [Item(el.name or el.kind, el.kind, (el.rect[0] - left, el.rect[1] - top, el.rect[2] - left,
+                                                el.rect[3] - top), True, el) for el in els]
+    page = segment(items, (pixels.shape[1], pixels.shape[0]), *dividers(pixels))
+    return [(r.place, [it.ref for row in _rows(r.items) for it in row]) for r in page.regions]
+
+
 def ocr_elements(hwnd: int) -> list[Element]:
     """For apps that describe nothing to UI Automation: the window's text lines, as click targets."""
     import win32gui
@@ -270,6 +302,21 @@ def _window(target: str | None) -> winutil.WindowInfo | None:
     return _target_window(target)
 
 
+def _in_own_browser(win) -> bool:
+    from mary import web
+
+    return web.owns(win)
+
+
+def page_elements() -> list[Element]:
+    """In MARY's own browser: the page's controls by their accessible names (acted on through Playwright)."""
+    from mary import web
+
+    data = web.browser().snapshot()
+    return [Element(c["role"], c["text"], tuple(c["rect"]), ("page", c["id"])) for c in data["controls"]
+            if c["text"] or c["role"] == "edit"]
+
+
 def tools(ctx: ToolContext) -> list[Tool]:
     resolved: dict = {}  # filled by tier() (risk check), reused by the action moments later
 
@@ -280,7 +327,12 @@ def tools(ctx: ToolContext) -> list[Tool]:
             return hit[1:]
         win = _window(args.get("window"))
         el, why = None, "no window to act on"
-        if win:
+        if win and _in_own_browser(win):  # a page in MARY's browser: its own controls, no pixels
+            els = page_elements()
+            if args.get("action") == "type":
+                els = [e for e in els if e.kind in ("edit", "combo box", "combobox")] or els
+            el, why = find(els, args.get("target") or "", ctx.screen_elements, "youtube" in win.title.lower())
+        elif win:
             els = elements(win.hwnd)
             if args.get("action") == "type":
                 els = [e for e in els if e.kind in ("edit", "combo box", "document")] or els
@@ -309,45 +361,65 @@ def tools(ctx: ToolContext) -> list[Tool]:
             direction = (target or "down").lower().split()[0]
             if direction not in ("up", "down", "top", "bottom"):
                 return ToolResult(False, "scroll target must be up, down, top or bottom.")
-            scroll(win.hwnd, direction, " ".join((target or "").lower().split()[1:]))
+            if _in_own_browser(win):
+                from mary import web
+
+                web.browser().scroll(direction)
+            else:
+                scroll(win.hwnd, direction, " ".join((target or "").lower().split()[1:]))
             return ToolResult(True, f"Scrolled {direction} in '{win.title}'.", say="Done.")
         if action == "list":
             win = _window(window or None)
             if not win:
                 return ToolResult(False, "No window to look at.")
-            els = elements(win.hwnd)[:40]
-            ctx.screen_elements = els
-            lines = [f"{i}. {el.kind}: {el.name[:70]}" for i, el in enumerate(els, 1)]
-            return ToolResult(True, f"Clickable in '{win.title}':\n" + "\n".join(lines) if lines
+            areas = _page_areas() if _in_own_browser(win) else _by_area(win, elements(win.hwnd))
+            ctx.screen_elements = [el for _, els in areas for el in els][:60]
+            lines, n = [], 0   # numbered across areas, in the order of ctx.screen_elements ("click number 3")
+            for place, els in areas:
+                take = els[:max(0, 60 - n)]
+                if take:
+                    lines.append(f"[{place}]")
+                for el in take:
+                    n += 1
+                    lines.append(f"{n}. {el.kind}: {el.name[:70]}")
+            return ToolResult(True, f"Clickable in '{win.title}', by area:\n" + "\n".join(lines) if lines
                               else f"'{win.title}' doesn't list its controls; try read_screen.")
         if action not in ("click", "type"):
             return ToolResult(False, "action must be click, type, scroll or list.")
         win, el, why = resolve({"action": action, "target": target, "window": window or None})
         resolved.clear()
-        if el is None:
-            return ToolResult(False, f"Couldn't {action} '{target}': {why}.", say=f"I couldn't find that: {why}.")
+        if el is None:  # maybe not there yet (a page still loading): the feedback loop tries again while it changes
+            return ToolResult(False, f"Couldn't {action} '{target}': {why}.", say=f"I couldn't find that: {why}.",
+                              status="not_yet" if win else "failed")
         if action == "type":
             if _SECRET_FIELD.search(el.name) or _SECRET_FIELD.search(target):
                 return ToolResult(False, "That looks like a password or card field; MARY never types into those.",
                                   say="That looks like a password or card field, so I'll leave that to you.")
-            winutil.focus_window(win.hwnd)
-            focus_field(el)
-            time.sleep(0.15)
-            import pyautogui
-            pyautogui.hotkey("ctrl", "a")  # replace what's in the box, like clicking in and typing fresh
-            winutil.type_unicode(text)
-            if submit:
-                pyautogui.press("enter")
+            if isinstance(el.com, tuple) and el.com[0] == "page":
+                from mary import web
+
+                web.browser().type(el.com[1], text, submit)
+            else:
+                winutil.focus_window(win.hwnd)
+                focus_field(el)
+                time.sleep(0.15)
+                import pyautogui
+                pyautogui.hotkey("ctrl", "a")  # replace what's in the box, like clicking in and typing fresh
+                winutil.type_unicode(text)
+                if submit:
+                    pyautogui.press("enter")
             return ToolResult(True, f"Typed into '{el.name or el.kind}' in '{win.title}'"
                                     f"{' and pressed Enter' if submit else ''}.", say="Done." if submit else "Typed it.")
-        before = win.title
-        how = click(el)
-        time.sleep(0.8)
-        after = winutil.window_title(win.hwnd)
-        moved = f" The window now shows: {after}." if after and after != before else ""
+        if isinstance(el.com, tuple) and el.com[0] == "page":
+            from mary import web
+
+            web.browser().click(el.com[1])  # Playwright: waits until it can be clicked; the real mouse stays put
+            how = "on the page"
+        else:
+            how = click(el)  # what it changed, and when that has settled, the feedback loop reports
         ctx.last_web_at = time.monotonic() if win.exe in ("msedge.exe", "chrome.exe", "firefox.exe") else ctx.last_web_at
         what = "Opening" if el.kind in ("link", "hyperlink") else "Clicked"
-        return ToolResult(True, f"Clicked {el.kind} '{el.name[:80]}' ({how}).{moved}", say=f"{what} {short(el.name)}.")
+        return ToolResult(True, f"Clicked {el.kind} '{el.name[:80]}' ({how}).", say=f"{what} {short(el.name)}.")
 
     return [Tool(
         "screen",
@@ -360,7 +432,7 @@ def tools(ctx: ToolContext) -> list[Tool]:
          "text": {"type": "string", "description": "for type: the text"},
          "submit": {"type": "boolean", "description": "for type: press Enter afterwards (e.g. to search)"},
          "window": {"type": "string", "description": "app or window; omit for the one in front"}},
-        ["action"], screen, tier=tier, speaks_for_itself=True, private=True,
+        ["action"], screen, tier=tier, speaks_for_itself=True, private=True, acts_on="window",
         announce=lambda a: {"click": f"Clicking {a.get('target', '')}…", "type": "Typing…",
                             "scroll": "Scrolling…", "list": "Looking at the screen…"}.get(a.get("action"), "…"),
         confirm_text=lambda a: f"click '{short((resolve(a)[1] or Element('', a.get('target', ''), (0, 0, 0, 0))).name)}'",

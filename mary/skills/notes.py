@@ -32,6 +32,6 @@ def tools(ctx: ToolContext) -> list[Tool]:
     return [
         Tool("create_note", "Save a note to Documents/MARY Notes (appends if the title already exists).",
              {"title": {"type": "string"}, "content": {"type": "string"}},
-             ["title", "content"], create_note, speaks_for_itself=True,
+             ["title", "content"], create_note, speaks_for_itself=True, watch=False,
              announce=lambda a: f"Saving note '{a.get('title', '')}'…"),
     ]

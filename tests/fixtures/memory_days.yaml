@@ -1,0 +1,179 @@
+# A made-up month for the memory tests: invented people, places and days, nothing real. `today` is the "now" of every
+# question. Records have labels so a question can say which ones answer it. mary/memory/bench.py adds a few hundred
+# filler diary lines (apps, weather, timers) around these, from a fixed seed, so the answers have to be found.
+today: 2026-11-04
+core:
+  - {label: c_edge, text: "I prefer Microsoft Edge"}
+  - {label: c_lena, text: "My sister's name is Lena"}
+  - {label: c_dog, text: "I live with my partner and a dog called Biscuit"}
+facts:
+  - {label: f_marcus, text: "Marcus is my friend from university", found: 2026-09-12}
+  - {label: f_marcel, text: "Marcel is a colleague who works on the finance team", found: 2026-09-20}
+  - {label: f_lisbon, text: "I live in Lisbon", found: 2026-03-01, ended: 2026-10-20, by: f_porto}
+  - {label: f_porto, text: "I live in Porto", found: 2026-10-20}
+  - {label: f_dentist, text: "My dentist is Dr. Haddad", found: 2026-08-02}
+  - {label: f_biscuit, text: "Biscuit is allergic to chicken", found: 2026-07-15}
+  - {label: f_birthday, text: "Lena's birthday is on the 12th of December", found: 2026-09-01}
+  - {label: f_job, text: "I work as a nurse at the city hospital", found: 2026-06-10}
+  - {label: f_tea, text: "I don't drink coffee, only tea", found: 2026-05-05}
+  - {label: f_car, text: "My car is a green Toyota Corolla", found: 2026-04-04}
+  - {label: f_gym, text: "I go swimming every Thursday evening", found: 2026-08-20}
+reflections:
+  - {label: r_quiet, day: 2026-10-28, text: "A quiet day: mostly music, and a note about the garden plan."}
+  - {label: r_busy, day: 2026-10-22, text: "A busy day: the electricity bill, two timers and a long search for train times."}
+diary:
+  - {label: d_meeting, at: "2026-11-02 08:55", text: 'Asked: "remind me my meeting with the bank is at 3:30 on Thursday". Used: create_note. Replied: "Noted, your bank meeting is Thursday at 3:30."'}
+  - {label: d_eggs, at: "2026-10-27 12:05", text: 'Asked: "how long do I boil eggs for a salad". Replied: "About ten minutes for hard-boiled eggs."'}
+  - {label: d_flight, at: "2026-10-14 18:20", text: 'Asked: "what is my flight number to Berlin". Used: read_screen. Replied: "Your flight is LH 1159, leaving at 8:40."'}
+  - {label: d_text_lena, at: "2026-10-30 19:02", text: 'Asked: "text Lena that I will call her on Sunday". Used: messages (private; reply not kept).'}
+  - {label: d_bill, at: "2026-10-22 20:11", text: 'Asked: "read my electricity bill". Used: read_document. Replied: "The bill is 84 euros, due on the 30th."'}
+  - {label: d_jazz, at: "2026-10-18 21:30", text: 'Asked: "play some jazz". Used: music. Replied: "Playing Jazz Classics on Spotify."'}
+  - {label: d_wedding, at: "2026-10-26 10:40", text: 'Asked: "note that I am going to Priya''s wedding on Saturday at 4 pm". Used: create_note. Replied: "Noted, Priya''s wedding on Saturday at four."'}
+  - {label: d_garden, at: "2026-10-28 16:15", text: 'Asked: "write a note about the garden plan: tomatoes by the fence, herbs near the door". Used: create_note. Replied: "Noted, in Garden plan."'}
+  - {label: d_train, at: "2026-10-22 14:00", text: 'Asked: "search the web for train times from Porto to Coimbra". Used: web, read_screen. Replied: "The next train leaves at 14:42 and takes an hour and ten."'}
+  - {label: d_shoes, at: "2026-10-09 11:25", text: 'Asked: "search the web for waterproof running shoes". Used: web. Replied: "Here is what came up."'}
+  - {label: d_pasta, at: "2026-10-12 18:45", text: 'Asked: "how much pasta for four people". Replied: "About 320 grams of dry pasta."'}
+  - {label: d_dentist, at: "2026-10-15 09:05", text: 'Asked: "set a reminder for my dentist appointment on Friday at 10". Used: create_note. Replied: "Noted, dentist on Friday at ten."'}
+  - {label: y_budget, at: "2026-11-03 09:30", text: 'Asked: "open the budget spreadsheet". Used: open_app, files. Replied: "Opening the budget spreadsheet."'}
+  - {label: y_poem, at: "2026-11-03 13:10", text: 'Asked: "find the poem about the ocean I saved". Used: find_files. Replied: "Found Ocean poem in Documents."'}
+  - {label: y_rain, at: "2026-11-03 17:40", text: 'Asked: "will it rain in the evening". Used: check_weather. Replied: "Light rain after six."'}
+  - {label: w_chair, at: "2026-10-29 10:00", text: 'Asked: "search the web for an ergonomic desk chair". Used: web. Replied: "Here is what came up."'}
+  - {label: w_chair2, at: "2026-10-30 10:20", text: 'Asked: "read the reviews of the second desk chair". Used: read_screen. Replied: "Most reviews praise the back support."'}
+# kind: what the question tests. split: dev sets the thresholds, held is reported untouched.
+questions:
+  # a name or a rare word
+  - {q: "What did I say about Marcus?", expect: [f_marcus], kind: name, split: dev}
+  - {q: "Who is Marcel?", expect: [f_marcel], kind: name, split: held}
+  - {q: "What is the name of my dentist?", expect: [f_dentist], kind: name, split: dev}
+  - {q: "What do you know about Biscuit?", expect: [f_biscuit, c_dog], kind: name, split: held}
+  - {q: "What did I text Lena?", expect: [d_text_lena], kind: name, split: dev}
+  - {q: "When is Lena's birthday?", expect: [f_birthday], kind: name, split: held}
+  - {q: "Tell me about Priya", expect: [d_wedding], kind: name, split: dev}
+  - {q: "What was LH 1159?", expect: [d_flight], kind: name, split: held}
+  # the same thing in other words
+  - {q: "When is the marriage ceremony I'm going to?", expect: [d_wedding], kind: paraphrase, split: dev}
+  - {q: "What time is my appointment at the bank?", expect: [d_meeting], kind: paraphrase, split: held}
+  - {q: "How long should hard-boiled eggs cook?", expect: [d_eggs], kind: paraphrase, split: dev}
+  - {q: "Which plane am I taking to Germany?", expect: [d_flight], kind: paraphrase, split: held}
+  - {q: "How much was the power bill?", expect: [d_bill], kind: paraphrase, split: dev}
+  - {q: "What do I do for a living?", expect: [f_job], kind: paraphrase, split: held}
+  - {q: "Which city do I live in now?", expect: [f_porto], kind: paraphrase, split: dev}
+  - {q: "Do I drink coffee?", expect: [f_tea], kind: paraphrase, split: held}
+  - {q: "What kind of car do I drive?", expect: [f_car], kind: paraphrase, split: dev}
+  - {q: "What can't my dog eat?", expect: [f_biscuit], kind: paraphrase, split: held}
+  - {q: "When do I go to the pool?", expect: [f_gym], kind: paraphrase, split: dev}
+  - {q: "What did I plant in my garden plan?", expect: [d_garden], kind: paraphrase, split: held}
+  # a day in words
+  - {q: "What did we do yesterday?", expect: [y_budget, y_poem, y_rain], kind: date, split: dev}
+  - {q: "What did I ask you yesterday?", expect: [y_budget, y_poem, y_rain], kind: date, split: held}
+  - {q: "What did I ask you about the weather yesterday?", expect: [y_rain], kind: date, split: dev}
+  - {q: "What file did I look for yesterday?", expect: [y_poem], kind: date, split: held}
+  - {q: "What did I ask last week about my dentist?", expect: [], kind: date_none, split: dev}
+  - {q: "What did I search for on 22 October?", expect: [d_train], kind: date, split: held}
+  - {q: "What did I look up about chairs last week?", expect: [w_chair, w_chair2], kind: date, split: dev}
+  - {q: "What notes did I write in October?", expect: [d_wedding, d_garden, d_meeting, d_dentist], kind: date, split: held}
+  - {q: "What did I read two days ago?", expect: [], kind: date_none, split: dev}
+  # facts that changed
+  - {q: "Where do I live?", expect: [f_porto], expect_not: [f_lisbon], kind: changed, split: dev}
+  - {q: "Where did I use to live?", expect: [f_lisbon], history: true, kind: changed, split: held}
+  # a similar name must not pull the wrong person
+  - {q: "Who is Marcus?", expect: [f_marcus], expect_not: [f_marcel], kind: distractor, split: dev}
+  - {q: "What does Marcel do?", expect: [f_marcel], expect_not: [f_marcus], kind: distractor, split: held}
+  - {q: "Who is Marcos?", expect: [], kind: distractor_none, split: dev}
+  # nothing in the memory
+  - {q: "What did I say about Mars rovers?", expect: [], kind: none, split: dev}
+  - {q: "What is the name of my horse?", expect: [], kind: none, split: held}
+  - {q: "What did I tell you about my passport?", expect: [], kind: none, split: dev}
+  - {q: "Did I ever mention a boat?", expect: [], kind: none, split: held}
+  # written after the thresholds were set and never used to set them: the unseen check
+  - {q: "Which dentist do I go to?", expect: [f_dentist], kind: paraphrase, split: fresh}
+  - {q: "Who works in finance?", expect: [f_marcel], kind: paraphrase, split: fresh}
+  - {q: "What should Biscuit not be fed?", expect: [f_biscuit], kind: paraphrase, split: fresh}
+  - {q: "What day does Lena celebrate her birthday?", expect: [f_birthday], kind: paraphrase, split: fresh}
+  - {q: "When am I meeting the bank?", expect: [d_meeting], kind: paraphrase, split: fresh}
+  - {q: "What was the departure time of my flight?", expect: [d_flight], kind: paraphrase, split: fresh}
+  - {q: "What is my sister called?", expect: [c_lena], kind: paraphrase, split: fresh}
+  - {q: "What vehicle do I have?", expect: [f_car], kind: paraphrase, split: fresh}
+  - {q: "Which browser do I use?", expect: [c_edge], kind: paraphrase, split: fresh}
+  - {q: "What did I note about tomatoes?", expect: [d_garden], kind: name, split: fresh}
+  - {q: "How long does the train from Porto take?", expect: [d_train], kind: paraphrase, split: fresh}
+  - {q: "Tell me about my cousin's wedding", expect: [d_wedding], kind: paraphrase, split: fresh}
+  - {q: "Do I have a swimming routine?", expect: [f_gym], kind: paraphrase, split: fresh}
+  - {q: "What is the cooking time for eggs?", expect: [d_eggs], kind: paraphrase, split: fresh}
+  - {q: "What did I search for last Thursday?", expect: [w_chair], kind: date, split: fresh}
+  - {q: "What is my wifi password?", expect: [], kind: none, split: fresh}
+  - {q: "What medicine am I taking?", expect: [], kind: none, split: fresh}
+  - {q: "What did I say about my landlord?", expect: [], kind: none, split: fresh}
+  - {q: "Who is Marcelo?", expect: [], kind: distractor_none, split: fresh}
+  # a second unseen batch, written after the first one had been looked at (and before the diary lines were embedded as
+  # plain sentences): never used to set anything
+  - {q: "Who do I know from university?", expect: [f_marcus], kind: paraphrase, split: fresh2}
+  - {q: "What are the plans for my tomatoes?", expect: [d_garden], kind: paraphrase, split: fresh2}
+  - {q: "On which date is Lena's birthday?", expect: [f_birthday], kind: paraphrase, split: fresh2}
+  - {q: "What did the electricity cost?", expect: [d_bill], kind: paraphrase, split: fresh2}
+  - {q: "How many grams of pasta did you say?", expect: [d_pasta], kind: name, split: fresh2}
+  - {q: "Where does the Coimbra train leave from?", expect: [d_train], kind: paraphrase, split: fresh2}
+  - {q: "What shoes was I searching for?", expect: [d_shoes], kind: paraphrase, split: fresh2}
+  - {q: "When is my teeth appointment?", expect: [d_dentist, f_dentist], kind: paraphrase, split: fresh2}
+  - {q: "What poem was I looking for yesterday?", expect: [y_poem], kind: date, split: fresh2}
+  - {q: "What job do I have?", expect: [f_job], kind: paraphrase, split: fresh2}
+  - {q: "Do I own a vehicle?", expect: [f_car], kind: paraphrase, split: fresh2}
+  - {q: "What did you tell me about eggs?", expect: [d_eggs], kind: name, split: fresh2}
+  - {q: "Is Biscuit allowed to eat poultry?", expect: [f_biscuit], kind: paraphrase, split: fresh2}
+  - {q: "What was my Berlin trip about?", expect: [d_flight], kind: paraphrase, split: fresh2}
+  - {q: "What did I say about my cat?", expect: [], kind: none, split: fresh2}
+  - {q: "Did I ask about concert tickets?", expect: [], kind: none, split: fresh2}
+  - {q: "Who is Marta?", expect: [], kind: distractor_none, split: fresh2}
+  - {q: "What did I tell you about my boss?", expect: [], kind: none, split: fresh2}
+# commands that have nothing to do with the past: no memory should be added to them
+ordinary:
+  - "open Spotify"
+  - "what time is it"
+  - "turn the volume down"
+  - "take a screenshot"
+  - "set a timer for ten minutes"
+  - "what's the weather like"
+  - "close Notepad"
+  - "type hello there"
+  - "pause the music"
+  - "what's twelve percent of two hundred"
+  - "lock the screen"
+  - "mute the sound"
+  - "open the calculator"
+  - "how's my battery"
+  - "search the web for pizza near me"
+  - "make the screen brighter"
+  - "put the computer to sleep"
+  - "skip this song"
+  - "what's on my screen"
+  - "open File Explorer"
+  - "write a note about buying milk"
+  - "what is the capital of France"
+  - "translate good morning into Spanish"
+  - "tell me a joke"
+  - "how are you today"
+  - "play something relaxing"
+  - "open the downloads folder"
+  - "minimise this window"
+  - "what's the date today"
+  - "snap this window to the left"
+  - "convert 5 miles to kilometres"
+  - "read what's on the page"
+  - "open Word"
+  - "show me my desktop"
+  - "turn it up a bit"
+  - "set an alarm for seven in the morning"
+  - "how much disk space is left"
+  - "find my CV"
+  - "who wrote Hamlet"
+  - "what's the square root of 144"
+  - "do I have any new messages"
+  - "what's my battery level"
+  - "how much disk space do I have left"
+  - "what's my screen brightness"
+  - "can you open the calculator for me"
+# a person or thing in memory is named, but nothing about the past is asked: the fact about them may come along
+mentions:
+  - {q: "text Marcus that I'm running late", expect: [f_marcus]}
+  - {q: "book a table for me and Lena", expect: [f_birthday]}
+  - {q: "walk Biscuit before dinner", expect: [f_biscuit]}

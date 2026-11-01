@@ -59,5 +59,5 @@ def tools(ctx: ToolContext) -> list[Tool]:
         Tool("media_control", "Pause, resume or skip whatever is already playing. To play something "
                               "specific, use play_music instead.",
              {"action": {"type": "string", "enum": MEDIA_ACTIONS}},
-             ["action"], media_control, speaks_for_itself=True, announce=lambda a: f"Media: {a.get('action', '')}…"),
+             ["action"], media_control, speaks_for_itself=True, watch=False, announce=lambda a: f"Media: {a.get('action', '')}…"),
     ]

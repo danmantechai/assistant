@@ -71,8 +71,9 @@ def is_filler(sentence: str, greetings_ok: bool = False) -> bool:
 class ReplyFilter:
     """Feed streamed text in; get back only the sentences worth saying, each once it's complete."""
 
-    def __init__(self, greetings_ok: bool = False):
+    def __init__(self, greetings_ok: bool = False, fix=None):
         self.greetings_ok = greetings_ok  # new mode: only chatbot habits are dropped
+        self.fix = fix or (lambda s: s)   # the persona's address guard: "Got it, Mom." -> "Got it."
         self.buffer = ""
         self.kept: list[str] = []
         self.dropped: list[str] = []
@@ -81,6 +82,7 @@ class ReplyFilter:
 
     def _judge(self, sentence: str) -> str:
         sentence = _THINK_TAG.sub(" ", sentence).strip()  # a stray "</think>" from the model, never spoken
+        sentence = self.fix(sentence).strip()
         if not sentence:
             return ""
         if self.markup or _MARKUP.search(sentence):
@@ -111,6 +113,7 @@ class ReplyFilter:
         if not parts or _FILLER_START.match(parts[0].strip()) or "<" in self.buffer:
             return ""
         clause, self.buffer = parts
+        clause = self.fix(clause)
         self.kept.append(clause.strip())
         self.started = True
         return clause.strip() + " "

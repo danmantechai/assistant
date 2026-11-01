@@ -32,7 +32,10 @@ def main() -> None:
     parser.add_argument("--config", help="path to config.yaml")
     parser.add_argument("--background", action="store_true",
                         help="no console: tray icon only (what the start-at-sign-in shortcut runs)")
+    parser.add_argument("--restarted", action="store_true", help=argparse.SUPPRESS)  # by the settings page
     args = parser.parse_args()
+    # run.bat starts MARY again when she exits for a restart, and says so in MARY_RESTARTED.
+    args.restarted = args.restarted or os.environ.get("MARY_RESTARTED") == "1"
 
     if sys.stdout is None or sys.stderr is None:  # pythonw: there is no console to write to
         sys.stdout = sys.stderr = open(os.devnull, "w", encoding="utf-8")
@@ -48,17 +51,18 @@ def main() -> None:
     debug = args.debug or cfg.logging.debug
     setup_logging(expand_path(cfg.paths.logs), cfg.logging.level)
     if not args.text:
-        if not winutil.single_instance("MARY-voice"):
+        # After a restart the old MARY may still be closing: wait for her to go.
+        if not winutil.single_instance("MARY-voice", wait_s=15 if args.restarted else 0):
             print("MARY is already running: look for her icon in the notification area (by the clock).")
             return
-        run_voice_mode(cfg, debug, background=args.background)
+        run_voice_mode(cfg, debug, background=args.background, restarted=args.restarted)
     elif args.hud:
         run_with_hud(cfg, debug)
     else:
         run_text_mode(cfg, debug)
 
 
-def run_voice_mode(cfg, debug: bool, background: bool = False) -> None:
+def run_voice_mode(cfg, debug: bool, background: bool = False, restarted: bool = False) -> None:
     """HUD and tray icon on the main thread; voice loop, hotkey and the console (for /commands) on
     their own threads. background: no console REPL (pythonw at sign-in); quit from the tray."""
     import signal
@@ -70,15 +74,27 @@ def run_voice_mode(cfg, debug: bool, background: bool = False) -> None:
     from mary.hud.output import HudOutput
     from mary.hud.tray import Tray
     from mary.hud.window import HudWindow
+    from mary.settings.server import Hooks
 
     signal.signal(signal.SIGINT, signal.SIG_DFL)
     app = QApplication(sys.argv[:1])
     app.setQuitOnLastWindowClosed(False)
     hud = HudWindow(cfg)
     hud_out = HudOutput(hud)
-    session = SimpleNamespace(loop=None, stop=threading.Event())
+    session = SimpleNamespace(loop=None, stop=threading.Event(), restart=False)
+
+    def restart() -> None:  # from the settings page's Restart button
+        session.restart = True
+        QMetaObject.invokeMethod(app, "quit", Qt.QueuedConnection)
+
+    # What the settings page may use while she runs. Restarting needs someone to start her again: run.bat, or
+    # herself when she runs in the background.
+    session.hooks = Hooks(running=True, restart=restart if background or _from_run_bat() else None)
     tray = Tray(app, cfg, on_talk=lambda: session.loop and session.loop.summon(), on_quit=app.quit,
-                log_file=expand_path(cfg.paths.logs) / "mary.log")
+                log_file=expand_path(cfg.paths.logs) / "mary.log",
+                on_settings=lambda: open_settings(cfg, session.hooks))
+    if restarted:  # the page that restarted her keeps working
+        open_settings(cfg, session.hooks, browser=False)
 
     def worker() -> None:
         try:
@@ -95,8 +111,57 @@ def run_voice_mode(cfg, debug: bool, background: bool = False) -> None:
     app.exec()
     session.stop.set()
     thread.join(timeout=3 if background else 0.5)  # a console session may be blocked reading input
-    if cfg.llm.get("unload_on_quit", True):
+    if session.restart:
+        _restart(cfg, background, debug)
+    elif cfg.llm.get("unload_on_quit", True):
         _unload_model(cfg)
+
+
+def _from_run_bat() -> bool:
+    return os.environ.get("MARY_LAUNCHER") == "run.bat"
+
+
+def open_settings(cfg, hooks, browser: bool = True) -> None:
+    """Start the settings page inside MARY (once) and open it in the default browser."""
+    import webbrowser
+
+    from mary.settings.server import DEFAULT_PORT, start
+
+    def go() -> None:
+        try:
+            srv = start(cfg.get("settings", {}).get("port", DEFAULT_PORT), hooks)
+            if browser:
+                webbrowser.open(srv.url)
+        except Exception:
+            logging.getLogger("mary").exception("couldn't open the settings page")
+
+    threading.Thread(target=go, name="settings-open", daemon=True).start()
+
+
+def _restart(cfg, background: bool, debug: bool) -> None:
+    """Start MARY again with the settings just saved. The model stays loaded unless it was changed, so she's
+    back in seconds; then she reads her (maybe new) instructions once."""
+    import subprocess
+
+    from mary.config import PROJECT_DIR, load_config
+
+    provider = lambda c: (c.get("brain") or {}).get("provider", "ollama")  # noqa: E731
+    try:
+        new = load_config()
+        changed = new.llm.model != cfg.llm.model or provider(new) != provider(cfg)
+    except Exception:
+        changed = False
+    if changed:
+        _unload_model(cfg)  # free the old one's memory before the new one loads
+    logging.getLogger("mary").info("restarting for the settings page%s", " (new model)" if changed else "")
+    if background:
+        pythonw = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
+        flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+        subprocess.Popen([pythonw, "-m", "mary", "--background", "--restarted", *(["--debug"] if debug else [])],
+                         cwd=PROJECT_DIR, creationflags=flags, close_fds=True)
+    else:
+        print("  Restarting MARY…", flush=True)
+        sys.exit(3)  # run.bat starts her again
 
 
 def _unload_model(cfg) -> None:
@@ -151,8 +216,9 @@ def voice_session(cfg, debug: bool, hud_out, session, tray, background: bool = F
     models = expand_path(cfg.paths.data) / "models"
     start = time.perf_counter()
     tray_out = TrayOutput(tray)
-    tts = make_voice(cfg, TextToSpeech(cfg, models),
-                     on_problem=lambda m: (console.status(f"⚠ {m}"), tray_out.status(m)))
+    kokoro = TextToSpeech(cfg, models)
+    session.hooks.kokoro = kokoro  # the settings page's voice samples use her Kokoro instead of loading another
+    tts = make_voice(cfg, kokoro, on_problem=lambda m: (console.status(f"⚠ {m}"), tray_out.status(m)))
     speaker = Speaker(cfg.audio.output_device, cfg.tts.volume, on_level=hud_out.level)
     voice_out = VoiceOutput(tts, speaker)
     voice_out.on_problem = lambda message: (console.status(f"⚠ {message}"), tray_out.status(message))
@@ -162,6 +228,12 @@ def voice_session(cfg, debug: bool, hud_out, session, tray, background: bool = F
         threading.Thread(target=_report_credits, args=(console, tts.client), daemon=True).start()
     # The voice sink comes first: it is the one that asks "Shall I go ahead?" (out loud).
     mary = Mary(cfg, MultiOutput(voice_out, hud_out, console, tray_out), debug)
+    if mary.memory is not None:
+        mary.memory.start()   # loads the meaning model on a background thread; the first request doesn't wait
+        mary.start_photos()
+    session.hooks.profile = mary.profile  # the settings page edits her own profile: it applies at once
+    session.hooks.memory = mary.memory    # and her memory: the Memory page changes the store she is using
+    session.hooks.photos, session.hooks.ingest = mary.photos, mary.ingest   # and her photos
     stt = make_ear(cfg, models, apps=mary.apps, on_problem=lambda m: (console.status(f"⚠ {m}"), tray_out.status(m)))
     if hasattr(stt, "client"):
         print(f"{console.DIM}  Hearing: {stt.name} (your local Whisper if it can't be reached).{console.RESET}")
@@ -180,7 +252,7 @@ def voice_session(cfg, debug: bool, hud_out, session, tray, background: bool = F
             wakeword = WakeWord(phrases, [threshold_for(m, cfg.wakeword.threshold) for m in phrases],
                                 cfg.wakeword.cooldown_s)
             if cfg.wakeword.get("verify"):
-                wake_check = WakeCheck(cfg.wakeword.verify, models, cfg.stt.cpu_threads)
+                wake_check = WakeCheck(cfg.wakeword.verify, models, cfg.stt.cpu_threads, mary.agent.persona)
         except Exception as e:
             print(f"  Wake word off ({e}). Use the hotkey.")
     wake_replies = None
@@ -213,6 +285,7 @@ def voice_session(cfg, debug: bool, hud_out, session, tray, background: bool = F
                      MultiOutput(console, tray_out), wakeword, hotkey_keys=(hotkey.mods, hotkey.vk),
                      wake_check=wake_check, wake_replies=wake_replies, cleaner=make_cleaner(cfg))
     session.loop = loop
+    session.hooks.pause_wake = loop.pause_wake  # while the settings page records wake-word takes
     hud_out.w.busy = lambda: loop.busy or voice_out.speaking  # the HUD stays until the conversation is over
     loop.start()
     hotkey.start()
@@ -227,6 +300,7 @@ def voice_session(cfg, debug: bool, hud_out, session, tray, background: bool = F
     print(f"  Ready: {how}, then speak. Hold the hotkey to talk as long as you like, or tap it again")
     print("  to finish. After answering, MARY keeps listening a few seconds for a follow-up.")
     tray.tooltip.emit(f"MARY · {how}")
+    session.hooks.ready = True
     logging.getLogger("mary").info("voice mode ready%s: %s", " (background)" if background else "", how)
     if background:
         tray.notice.emit(f"MARY is ready: {how}.")
@@ -323,6 +397,9 @@ def run_text_mode(cfg, debug: bool, extra: list | None = None, on_ready=None) ->
     sink = MultiOutput(out, *extra) if extra else out  # the console stays first: it asks confirmations
     print(f"{out.CYAN}MARY{out.RESET} · text mode · {cfg.llm.model} · /help for commands")
     mary = Mary(cfg, sink, debug)
+    if mary.memory is not None:
+        mary.memory.start()
+        mary.start_photos()
     router = f"router ready in {mary.router_load_s:.1f} s" if mary.router else "router off"
     print(f"{out.DIM}  {len(mary.apps.apps)} apps indexed, {router}. Warming up the model…{out.RESET}",
           flush=True)

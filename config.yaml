@@ -5,6 +5,10 @@
 # known folders, so OneDrive-redirected folders work) and {project} (this folder).
 # Measurements quoted below were taken on the author's laptop (Ryzen 5 PRO 4650U, 16 GB, no GPU).
 
+# Who she is: a persona pack in personas/<name>/ (or your own, private, in user/personas/<name>/). It brings her
+# character, how she talks and writes, her voice, wake words and replies. See personas/_template.
+persona: mary
+
 llm:
   host: http://127.0.0.1:11434
   # Qwen3.5 2B (tools + thinking on/off per request). Measured with `python -m mary.llm.bench` (plugged in),
@@ -31,6 +35,10 @@ llm:
   # (think_triggers below), or when the model itself decides a request needs it.
   think_by_default: false
   think_triggers: ["think about this", "think carefully", "think hard", "think it through", "take your time"]
+  # How hard to think, for models that offer levels (beam:cloud and other cloud models: low … max; their own
+  # default is often the highest, far slower than a spoken reply needs). Sent to an API service as
+  # reasoning_effort. Models with plain on/off thinking ignore it.
+  think_level: medium
   # num_predict caps output tokens. Temperatures are lower than Qwen's defaults (0.7 / 0.6): measured with
   # qwen3.5:2b on repeated sums and reasoning, 0.2 / 0.3 got 15/18 right against 11/18 at the defaults.
   sampling:
@@ -44,12 +52,19 @@ llm:
     OLLAMA_FLASH_ATTENTION: "1"
     OLLAMA_KV_CACHE_TYPE: f16
 
-# The brain socket (mary/brain/): which language model is MARY's brain. Ollama's settings are in llm: above.
+# The brain socket (mary/brain/): which language model is MARY's brain.
+#   ollama = llm.model through Ollama (settings in llm: above): a model on this PC, or one of Ollama's cloud
+#            models (beam:cloud), which run on ollama.com once you've run `ollama signin`.
+#   api    = any service that speaks the OpenAI chat API (OpenAI, OpenRouter, Groq, LM Studio…), below.
+# With a cloud model or a service, what you say and what MARY reads to answer is sent there.
 brain:
   provider: ollama
   # today = the router handles simple commands and passes the rest to the model with its guess (as before);
   # new = a few instant commands as reflexes, everything else to the model whole, answered in her own words.
   mode: new
+  api:
+    url: ""                 # e.g. https://openrouter.ai/api/v1, or http://127.0.0.1:1234/v1 for LM Studio
+    model: ""               # the service's name for it; the key goes in .env as LLM_API_KEY
 
 # Skill bricks (mary/skills/): one ability each. Remove a name to switch that ability off; to add one, copy
 # mary/skills/_template.py and add its name here. Restart MARY after editing.
@@ -66,14 +81,18 @@ skills:
   - screenshot
   - notes
   - timers
-  - powershell      # commands (always shows them and asks)
+  - powershell      # commands (ones that only look run at once; the rest show and ask)
   - read_screen     # read a window or page
   - music           # play on Spotify
   - messages        # WhatsApp chat list
-  - weather
+  - weather         # now and the next three days (wttr.in)
   - screen_control  # click, type into boxes, scroll in any app
   - memory          # remember things about you
   - clock           # the time and date (instant)
+  - calculate       # exact sums, percentages, dates and unit conversions
+  - waiting         # wait for an app or page that's still starting
+  - look            # what a window or photo looks like (a model that can see)
+  - documents       # read a PDF, Word, Excel, PowerPoint or text file's text
 
 audio:
   input_device: null        # null = Windows default microphone; or a name/number from `python -m mary.voices --devices`
@@ -230,12 +249,95 @@ apps:
   # Start Menu entries matching this are never launched by name.
   exclude_pattern: "(?i)\\b(uninstall|uninstaller|readme|read me|release notes|license|changelog|documentation|manual)\\b"
 
+# Vision (mary/vision.py): the model that looks at a window or a photo when something has to be seen (the look
+# skill). Empty = the brain itself if it can see images, else the smallest model on this PC that can (your
+# qwen3.5:2b can, slowly on a CPU). A cloud model ("…cloud") is fast but sends the picture to ollama.com.
+vision:
+  model: ""
+
+# Memory (mary/memory/): the diary of what happened, the facts she learns about you, and later the moments in your photos,
+# in one local store: user/memory/ (private, never published). memory.db is the store; facts.md, diary/ and
+# reflections.md are the same memories as plain text you can read and edit (changes are picked up within 5 minutes).
+# What you tell her to "remember that…" stays in user/profile.yaml and goes with every request, as before.
+memory:
+  enabled: true
+  model: BAAI/bge-small-en-v1.5   # meaning search (the same small model the router uses; 14 ms per question here)
+  threads: 2
+  # What is added to a request's context. Facts and day summaries that match come along with any request; the diary
+  # only when the request is about the past ("what did we do yesterday"). Tuned on a made-up month
+  # (python -m mary.memory.bench): ordinary commands add nothing, and the right memory is in the top three for
+  # about nine questions in ten. min_relevance: how well it must match (0-1); min_relevance_unasked: the bar for a
+  # request that isn't about the past or about you. cosine_low/high: where meaning similarity maps to 0 and 1.
+  recall:
+    max_items: 5
+    max_tokens: 300
+    min_relevance: 0.4
+    min_relevance_unasked: 0.8
+    cosine_low: 0.55
+    cosine_high: 0.85
+    name_relevance: 0.9
+    one_word_relevance: 0.6
+  # Ranking among what matches: relevance leads, recency and importance break ties. half_life_days: how fast each
+  # kind of memory fades from the ranking.
+  scoring:
+    recency: 0.06
+    importance: 0.04
+    half_life_days: {diary: 14, fact: 365, core: 365, reflection: 30}
+  facts:
+    same_meaning: 0.90      # a new fact this close in meaning to a known one is merged with it
+  diary:
+    enabled: true
+    request_chars: 240
+    reply_chars: 160
+  # The background pass: while nobody is using MARY or the PC, her model reads what you said and writes down the lasting
+  # facts (and, if reflections is on, a sentence about each finished day). OFF unless you switch it on: with a model in
+  # the cloud, what you said goes there (never her replies, and nothing from messages or the screen).
+  consolidate:
+    enabled: false
+    idle_minutes: 10        # nothing said to MARY for this long
+    only_on_ac: true        # not on battery
+    min_lines: 6            # waits for this many new diary lines
+    reflections: true
+
+# Photos (mary/photos/): you add folders on the settings page (Memory > Photos); until you do, nothing is read. Each photo is
+# read once, on this PC, into a record (when it was taken and how she knows, where, whether it's a copy, the words in it) and a
+# thumbnail kept in user/memory/photos/. The originals are never moved, changed or deleted.
+photos:
+  enabled: true
+  min_side: 200             # smaller than this on its short side is an icon or a sticker, not a photo
+  read_text: true           # the words printed in photos, read by Windows' OCR on this PC (about 0.26 s a photo here)
+  rescan_s: 300             # look for new photos in your folders this often
+  # The list of places GPS positions are named from (GeoNames "cities1000", about 10 MB, fetched only when you say so:
+  # python -m mary.photos.places --download). Without it photos just have no place name.
+  gazetteer: "{project}/data/places/gazetteer.db"
+  exclude: []               # folders never to look in (her own screenshot folder is always left out)
+  # Recognising people (docs/people.md). On by default; it needs two small face models (about 39 MB, fetched from Settings >
+  # People, only when you press the button). Names only ever come from you. Fingerprints are biometric: they stay on this PC.
+  faces:
+    allowed: true           # false: faces are never read
+    models: "{project}/data/models/faces"
+    detect_px: 1600         # a picture is looked at no bigger than this on its long side (smaller = faster, small faces missed)
+    min_px: 48              # a face smaller than this (in that picture) is not fingerprinted, grouped or named
+    min_score: 0.7          # nor one the detector is less sure of
+    threads: 2
+    # How alike two faces are (cosine of fingerprints; 1 = identical). Cautious on purpose: a wrong name is worse than a question.
+    join: 0.55              # this like someone you named, and clearly ahead of the others: it is them
+    margin: 0.08            # "clearly ahead": by this much
+    ask: 0.40               # from here up to `join`: possibly them, so she asks ("Is this Ama?")
+    group: 0.45             # unnamed groups at least this alike (on average) are one
+    alone: 0.05             # a single face needs this much more than `group` to join a group
+    same: 0.30              # two groups this alike are offered as "the same person?"
+
 weather:
   # Where check_weather looks. Empty = the weather site guesses from your internet connection (it names your
   # region). Or a city, e.g. Lisbon.
   place: ""
 
 web:
+  # Web pages open in MARY's own Edge window (Playwright, with its own profile in data/browser/, private), so she
+  # reads and clicks them through the page's own structure, never pixels. Sign in there once (WhatsApp's QR code,
+  # YouTube). false = your default browser, as before (read through the screen instead).
+  own_browser: true
   search_url: "https://www.google.com/search?q={query}"
   # "search YouTube for …" / "find … on YouTube" searches the site itself, so its results can be clicked.
   search_sites:

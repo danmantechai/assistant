@@ -16,7 +16,8 @@ def test_your_settings_merge_over_the_defaults(tmp_path, monkeypatch):
     cfg = load_config()
     assert cfg.llm.model == "qwen3:4b-q4_K_M" and cfg.llm.num_ctx == 8192        # one key changed, the rest kept
     assert cfg.tts.elevenlabs.voice_id == "abc" and cfg.tts.elevenlabs.model    # nested sections merge
-    assert cfg.stt.words == ["Bolt Food"]                                        # lists are replaced
+    assert cfg.stt.words[-1] == "Bolt Food" and "Notepad" not in cfg.stt.words   # lists are replaced
+    assert "Hey Mary" in cfg.stt.words                                          # (the persona adds her names)
 
 
 def test_a_config_passed_by_path_is_read_alone(tmp_path, monkeypatch):

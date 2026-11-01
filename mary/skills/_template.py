@@ -4,6 +4,10 @@ Restart MARY. Only tools() is required; leave out what you don't need.
 
 Keep the tool's result factual (ToolResult.text): MARY's brain turns it into her own words. `say` is the
 short line used when the tool runs as an instant reflex (and in the old mode).
+
+Don't sleep to wait for an app or page: every call runs inside the feedback loop (mary/ready.py). Report what you
+started (ToolResult waits_for=), say "not yet" (status="not_yet") when what you need isn't there yet, and mark a
+tool that never touches a window watch=False. docs/skills.md has the details.
 """
 from __future__ import annotations
 

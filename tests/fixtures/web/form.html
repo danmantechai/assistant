@@ -1,0 +1,10 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Form</title></head>
+<body>
+<label>City <input id="city" placeholder="Your city"></label>
+<button onclick="document.getElementById('out').textContent = 'Saved ' + document.getElementById('city').value">Save</button>
+<form onsubmit="event.preventDefault(); document.getElementById('out').textContent = 'Submitted ' + document.getElementById('q').value">
+  <input id="q" aria-label="Search the site">
+</form>
+<p id="out"></p>
+</body></html>

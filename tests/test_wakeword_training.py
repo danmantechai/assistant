@@ -58,10 +58,13 @@ def test_failed_training_never_replaces_a_model_that_works(tmp_path):
 
 def test_speech_recognition_confirms_only_the_wake_phrase():
     # How Whisper wrote the user's own "Hey Mom" takes, and what it heard for the sound-alikes he recorded.
+    from tests.conftest import mom_persona
+
+    mom = mom_persona()
     for heard in ("Hey, Mom.", "Hey mom", "Hey, Mum.", "Mom.", "Here Mom", "A mom"):
-        assert confirms("hey_mom", heard), heard
+        assert confirms("hey_mom", heard, mom), heard
     for heard in ("I'll call my mum later", "Mum's birthday is on Friday", "Come on.", "Hey Tom", "um", ""):
-        assert not confirms("hey_mom", heard), heard
+        assert not confirms("hey_mom", heard, mom), heard
     assert confirms("hey_mary", "Amen.") and confirms("hey_mary", "Hey, Mary.")
     assert not confirms("hey_mary", "Merry Christmas")
     assert confirms("hey_jarvis", "")  # built-in wake words aren't checked

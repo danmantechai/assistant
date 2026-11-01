@@ -42,6 +42,6 @@ def tools(ctx: ToolContext) -> list[Tool]:
         return ToolResult(True, text, say=text)
 
     return [
-        Tool("get_system_status", "Battery, CPU, RAM, disk space and uptime.", {}, [], get_system_status,
+        Tool("get_system_status", "Battery, CPU, RAM, disk space and uptime.", {}, [], get_system_status, watch=False,
              announce=lambda a: "Checking system status…"),
     ]

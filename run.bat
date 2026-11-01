@@ -6,4 +6,11 @@ if not exist ".venv\Scripts\python.exe" (
     pause
     exit /b 1
 )
+rem The settings page's "Restart MARY" ends her with code 3: start her again.
+set MARY_LAUNCHER=run.bat
+:start
 ".venv\Scripts\python.exe" -m mary %*
+if %errorlevel%==3 (
+    set MARY_RESTARTED=1
+    goto start
+)

@@ -1,4 +1,5 @@
-"""web: open a URL / known site, or search the web, in the default browser."""
+"""web: open a URL / known site, or search the web: in MARY's own browser (mary/web, web.own_browser), where she can
+read and act on pages through their own structure, or else in the default browser."""
 from __future__ import annotations
 
 import os
@@ -19,11 +20,39 @@ GROUNDING = [
 SLOW = {"web": ["One moment.", "Let me look that up."]}
 
 
-def open_site(url: str) -> bool:
-    """Open `url` in the default browser. Returns True if an already-open tab was reused instead.
+def own_browser(cfg=None) -> bool:
+    """Pages open in MARY's own browser: switched on, and Playwright installed."""
+    from mary import web
+    from mary.config import load_config
 
-    Only WhatsApp Web is reused: it works in a single tab at a time, so a second copy breaks it.
+    cfg = cfg or load_config()
+    return bool((cfg.get("web") or {}).get("own_browser", True)) and web.available()
+
+
+def open_page(url: str, cfg=None) -> str | None:
+    """Open `url` in MARY's own browser and wait for it to load: its title, or None when it opened elsewhere."""
+    if own_browser(cfg):
+        from mary import web
+
+        try:
+            return web.browser(cfg).open(url)["title"] or url
+        except Exception as e:  # Edge missing, a crash: the default browser still works
+            import logging
+
+            logging.getLogger(__name__).warning("MARY's browser couldn't open %s: %s", url, e)
+    os.startfile(url)  # only http(s) URLs reach here, so this always means "default browser"
+    return None
+
+
+def open_site(url: str) -> bool:
+    """Open `url` (MARY's browser, else the default one). Returns True if an already-open tab was reused instead.
+
+    In the default browser only WhatsApp Web is reused: it works in a single tab at a time, so a second copy
+    breaks it. (MARY's browser reuses a tab already showing the page by itself.)
     """
+    if own_browser():
+        open_page(url)
+        return False
     if "web.whatsapp.com" in url:
         from mary.skills.messages import focus_existing
 
@@ -72,25 +101,34 @@ def tools(ctx: ToolContext) -> list[Tool]:
             if invented(url):
                 return ToolResult(False, "Not opened: that address wasn't in what the user said or on screen, so "
                                          "it may be made up. To open a result, click it by its title with screen.")
-            if open_site(url):
-                return ToolResult(True, f"Switched to the open {url} tab.", say="It's already open; here it is.")
-            return ToolResult(True, f"Opened {url}.", say="Opening it now.")
+            if own_browser(ctx.cfg):
+                title = open_page(url, ctx.cfg)
+                if title is not None:
+                    return ToolResult(True, f"Opened {url} in MARY's browser: '{title}'. read_screen reads it.",
+                                      say="Opening it now.", waits_for="front")
+            elif open_site(url):
+                return ToolResult(True, f"Switched to the open {url} tab.", say="It's already open; here it is.",
+                                  waits_for="front")
+            else:
+                return ToolResult(True, f"Opened {url}.", say="Opening it now.", waits_for="front")
+            return ToolResult(True, f"Opened {url} in the default browser.", say="Opening it now.", waits_for="front")
         if action == "search":
             template = search_sites.get(site.strip().lower(), search_url)  # "search YouTube for…": YouTube itself
-            os.startfile(template.format(query=quote_plus(value)))
+            title = open_page(template.format(query=quote_plus(value)), ctx.cfg)
             # Say only what happened: the results are open, not read. "Here's what I found" once led the
             # model to invent the weather when asked "what did you find?".
-            return ToolResult(True, f"Opened a web search for '{value}' in the browser. The results haven't "
+            where = f"MARY's browser ('{title}')" if title else "the browser"
+            return ToolResult(True, f"Opened a web search for '{value}' in {where}. The results haven't "
                                     "been read; read_screen can read them.",
                               say=f"I've opened a search for {value}"
                                   f"{' on ' + site.strip().title() if site.strip().lower() in search_sites else ''}"
-                                  f" in your browser.")
+                                  f" in your browser.", waits_for="front")
         return ToolResult(False, "action must be 'open_url' or 'search'.")
 
     return [Tool(
         "web",
         "Open a website (URL, domain, or a known site name like 'youtube') or run a web search, "
-        "in the default browser.",
+        "in MARY's browser.",
         {"action": {"type": "string", "enum": ["open_url", "search"]},
          "value": {"type": "string", "description": "URL/site name for open_url, or the search query"},
          "site": {"type": "string", "description": "search on this site instead of Google, e.g. youtube"}},

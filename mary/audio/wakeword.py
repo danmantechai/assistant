@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import time
 from pathlib import Path
 
@@ -80,20 +79,15 @@ class WakeWord:
         self.model.reset()
 
 
-# What speech recognition must hear for each trained phrase (keyed by a word in the model's name). Whisper
-# often writes the user's "Hey Mom" as "Mom", "Here Mom" or "A mom"; a bare "Mom" counts, since that's what
-# he calls her. "I'll call my mum later" and "Mum's birthday…" don't.
-_CONFIRM = {
-    "mom": re.compile(r"\b(?:hey|hi|hay|a|your|yo|here|hear)\W*(?:mom|mum|mommy|mummy|mam|ma)\b"
-                      r"|^\W*(?:mom|mum|mommy|mummy)\W*$", re.I),
-    "mary": re.compile(r"\b(?:hey|hi|hay|ok|okay)\W*(?:mary|marie|mari|mery)\b|^\W*(?:mary|amen)\W*$", re.I),
-}
+def confirms(key: str, text: str, persona=None) -> bool:
+    """Does `text` (what Whisper heard) say the wake phrase of model `key`? The persona's wake phrases say how
+    speech recognition writes each one: Whisper often writes "Hey Mom" as "Mom", "Here Mom" or "A mom", and a
+    bare name counts where the persona allows it; "I'll call my mum later" doesn't. Phrases the persona doesn't
+    describe (built-ins like hey_jarvis) aren't checked."""
+    from mary import persona as personas
 
-
-def confirms(key: str, text: str) -> bool:
-    """Does `text` (what Whisper heard) say the wake phrase of model `key`? Built-ins aren't checked."""
-    pattern = next((p for word, p in _CONFIRM.items() if word in key.lower()), None)
-    return pattern is None or bool(pattern.search(text))
+    wake = (persona or personas.load()).wake_for(key)
+    return wake is None or bool(wake.confirm_pattern().search(text))
 
 
 class WakeCheck:
@@ -105,18 +99,21 @@ class WakeCheck:
 
     SECONDS = 2.5
 
-    def __init__(self, model: str, models_dir: Path, cpu_threads: int = 6):
+    def __init__(self, model: str, models_dir: Path, cpu_threads: int = 6, persona=None):
         from faster_whisper import WhisperModel
 
+        from mary import persona as personas
+
+        self.persona = persona or personas.load()
         self.model = WhisperModel(model, device="cpu", compute_type="int8", cpu_threads=cpu_threads,
                                   download_root=str(models_dir / "whisper"))
 
     def heard(self, key: str, audio: np.ndarray) -> tuple[bool, str]:
         """(confirmed, what was heard) for int16 audio ending where model `key` fired."""
-        if not any(word in key.lower() for word in _CONFIRM):
+        if self.persona.wake_for(key) is None:
             return True, ""
         segments, _ = self.model.transcribe(audio.astype(np.float32) / 32768.0, beam_size=1, language="en",
                                             vad_filter=False, without_timestamps=True,
                                             condition_on_previous_text=False)
         text = " ".join(s.text.strip() for s in segments)
-        return confirms(key, text), text
+        return confirms(key, text, self.persona), text

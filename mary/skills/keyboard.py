@@ -103,7 +103,7 @@ def tools(ctx: ToolContext) -> list[Tool]:
         "Type text into the focused window, or press a key combination like 'ctrl+s', 'win+d', 'alt+tab'.",
         {"action": {"type": "string", "enum": ["type", "hotkey"]},
          "text": {"type": "string", "description": "text to type, or keys joined with +"}},
-        ["action", "text"], keyboard, tier=tier, speaks_for_itself=True,
+        ["action", "text"], keyboard, tier=tier, speaks_for_itself=True, acts_on="front",
         announce=lambda a: ("Typing…" if a.get("action") == "type" else f"Pressing {a.get('text', '')}…"),
         confirm_text=lambda a: (f"type {len(a.get('text', ''))} characters into the focused window"
                                 if a.get("action") == "type" else f"press {a.get('text', '')}"),

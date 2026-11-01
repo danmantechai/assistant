@@ -3,17 +3,16 @@
     python -m mary.voices                   play every female voice, best-rated first
     python -m mary.voices af_bella bf_emma  play just these
     python -m mary.voices --text "..."      use your own sample line
-    python -m mary.voices --set af_bella    make it MARY's voice (edits tts.voice in config.yaml)
+    python -m mary.voices --set af_bella    make it her voice (saved in her persona; or use the settings page)
     python -m mary.voices --blend af_heart:0.6,bf_emma:0.4   try a mix of two voices
     python -m mary.voices --list | --devices
 """
 from __future__ import annotations
 
 import argparse
-import re
 import sys
 
-from mary.config import DEFAULT_CONFIG, expand_path, load_config
+from mary.config import expand_path, load_config
 
 # Kokoro's own quality grades (hexgrad/Kokoro-82M VOICES.md), best first.
 FEMALE = [("af_heart", "A", "American, warm"), ("af_bella", "A-", "American, bright"),
@@ -24,19 +23,15 @@ FEMALE = [("af_heart", "A", "American, warm"), ("af_bella", "A-", "American, bri
 SAMPLE = "Hello, I'm MARY. Spotify is playing, and you have two new messages. Shall I go ahead?"
 
 
-def with_voice(config_text: str, voice: str) -> str | None:
-    """config.yaml text with only the tts section's `voice:` value changed (comments kept)."""
-    new, n = re.subn(r"(?m)^(tts:\n(?:[ \t#].*\n|\n)*?[ \t]+voice:[ \t]*)(\S+)", rf"\g<1>{voice}",
-                     config_text, count=1)
-    return new if n else None
-
-
 def set_voice(voice: str) -> None:
-    new = with_voice(DEFAULT_CONFIG.read_text(encoding="utf-8"), voice)
-    if new is None:
-        sys.exit("Couldn't find tts.voice in config.yaml; set it by hand.")
-    DEFAULT_CONFIG.write_text(new, encoding="utf-8")
-    print(f"MARY's voice is now {voice}. Restart MARY to hear it.")
+    """Make it her voice: saved in her persona (your private copy of it), as the settings page does."""
+    from mary.settings import store
+
+    key = store.layers().key
+    store.save_persona(key, {"voice": {"voice": voice}})
+    her = store.persona_info(key)
+    backup = " (her backup voice: she speaks with ElevenLabs)" if her["voice"].get("provider") == "elevenlabs" else ""
+    print(f"{her['name']}'s Kokoro voice is now {voice}{backup}, saved in {her['folder']}. Restart MARY to hear it.")
 
 
 def main() -> None:

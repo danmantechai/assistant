@@ -9,7 +9,9 @@ from mary import winutil
 log = logging.getLogger(__name__)
 
 
-def live_context(hint: str | None = None) -> str:
+def live_context(hint: str | None = None, extra: list[str] | tuple = ()) -> str:
+    """The <context> block in front of each request: time, front window, volume, the router's guess (old mode),
+    and `extra` lines (the persona's memories or writing examples that fit this request)."""
     lines = [f"time: {datetime.now():%A %d %B %Y, %H:%M}"]
     fg = winutil.foreground_window()
     if fg and not winutil.is_own_console(fg.hwnd):
@@ -23,4 +25,5 @@ def live_context(hint: str | None = None) -> str:
         log.debug("volume unavailable: %s", e)
     if hint:
         lines.append(f"router guess: {hint}")
+    lines += list(extra)
     return "<context>\n" + "\n".join(lines) + "\n</context>\n"

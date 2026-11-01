@@ -1,0 +1,13 @@
+# The screen, read the right way: one open chat by who wrote what (from the live session where the chat list was
+# read out instead), and "describe my screen", which has to be seen.
+name: Reading and seeing
+active_window: {title: "WhatsApp - Edge", exe: msedge.exe}
+turns:
+  - user: "What did Kofi say to me on WhatsApp?"
+    expect: {tools: [check_messages], avoid: [run_powershell]}
+    results:
+      check_messages: {text: "The chat with Kofi, oldest first; → marks the user's own messages:\n← Where are you?\n← Meet me at the junction\n→ Coming", say: null}
+  - user: "Describe my screen."
+    expect: {tools: [look]}
+    results:
+      look: {text: "Looking at 'WhatsApp - Edge': A chat app with a list of chats on the left and an open conversation on the right, with green bubbles for the user's messages."}
