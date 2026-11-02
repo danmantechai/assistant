@@ -258,8 +258,11 @@
     });
   }
 
+  // The words (what was heard, the reply, the tool log) are for debugging: normally the voice and the face say it all.
+  function textPanel(on) { root.classList.toggle("no-text", !on); }
+
   window.hud = { show, hide, state: setState, user, replyStart, replyDelta, replyEnd,
-                 log: logLine, notify, ask, level: setLevel,
+                 log: logLine, notify, ask, level: setLevel, textPanel,
                  avatarConfig, avatarToggle, avatarFrame };
   refreshPanel();
 })();

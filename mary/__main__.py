@@ -55,14 +55,14 @@ def main() -> None:
         if not winutil.single_instance("MARY-voice", wait_s=15 if args.restarted else 0):
             print("MARY is already running: look for her icon in the notification area (by the clock).")
             return
-        run_voice_mode(cfg, debug, background=args.background, restarted=args.restarted)
+        run_voice_mode(cfg, debug, background=args.background, restarted=args.restarted, debug_flag=args.debug)
     elif args.hud:
         run_with_hud(cfg, debug)
     else:
         run_text_mode(cfg, debug)
 
 
-def run_voice_mode(cfg, debug: bool, background: bool = False, restarted: bool = False) -> None:
+def run_voice_mode(cfg, debug: bool, background: bool = False, restarted: bool = False, debug_flag: bool = False) -> None:
     """HUD and tray icon on the main thread; voice loop, hotkey and the console (for /commands) on
     their own threads. background: no console REPL (pythonw at sign-in); quit from the tray."""
     import signal
@@ -79,7 +79,7 @@ def run_voice_mode(cfg, debug: bool, background: bool = False, restarted: bool =
     signal.signal(signal.SIGINT, signal.SIG_DFL)
     app = QApplication(sys.argv[:1])
     app.setQuitOnLastWindowClosed(False)
-    hud = HudWindow(cfg)
+    hud = HudWindow(cfg, show_text=debug)
     from mary.avatar.director import AvatarDirector
     hud.set_avatar(AvatarDirector(getattr(cfg, "persona", "mary")), getattr(cfg, "persona", "mary"))
     hud_out = HudOutput(hud)
@@ -114,7 +114,7 @@ def run_voice_mode(cfg, debug: bool, background: bool = False, restarted: bool =
     session.stop.set()
     thread.join(timeout=3 if background else 0.5)  # a console session may be blocked reading input
     if session.restart:
-        _restart(cfg, background, debug)
+        _restart(cfg, background, debug_flag)   # only --debug carries over: the setting is read again on start
     elif cfg.llm.get("unload_on_quit", True):
         _unload_model(cfg)
 
@@ -225,7 +225,8 @@ def voice_session(cfg, debug: bool, hud_out, session, tray, background: bool = F
     voice_out = VoiceOutput(tts, speaker)
     voice_out.on_audio = hud_out.speech_audio
     voice_out.on_stop = hud_out.speech_stopped
-    voice_out.on_problem = lambda message: (console.status(f"⚠ {message}"), tray_out.status(message))
+    # When she can't speak, her replies are only words: show them on the HUD even outside debug mode.
+    voice_out.on_problem = lambda message: (console.status(f"⚠ {message}"), tray_out.status(message), hud_out.show_text())
     if hasattr(tts, "client"):
         print(f"{console.DIM}  Voice: {tts.name}, the voice in tts.elevenlabs.voice_id (Kokoro if it can't be "
               f"reached).{console.RESET}")
@@ -352,7 +353,7 @@ def run_with_hud(cfg, debug: bool) -> None:
     signal.signal(signal.SIGINT, signal.SIG_DFL)  # Qt's loop can't see Ctrl+C, so let it end MARY directly
     app = QApplication(sys.argv[:1])
     app.setQuitOnLastWindowClosed(False)
-    hud = HudWindow(cfg)
+    hud = HudWindow(cfg, show_text=debug)
     from mary.avatar.director import AvatarDirector
     hud.set_avatar(AvatarDirector(getattr(cfg, "persona", "mary")), getattr(cfg, "persona", "mary"))
     hud_out = HudOutput(hud)

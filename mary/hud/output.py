@@ -29,6 +29,9 @@ class HudOutput(Output):
         if getattr(self.w, "director", None) is not None:
             self.w.director.feed_audio(audio, sample_rate=sample_rate, starts_at=starts_at)
 
+    def show_text(self, on: bool = True) -> None:
+        self._js("textPanel", bool(on))
+
     def speech_stopped(self) -> None:
         if getattr(self.w, "director", None) is not None:
             self.w.director.stop_speech()

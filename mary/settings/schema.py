@@ -71,6 +71,9 @@ PAGES: dict[str, list[Field]] = {
               choices=[["base.en", "base.en (faster)"], ["small.en", "small.en (more accurate)"]]),
         Field("vad.long_end_silence_ms", "Longest pause", "How long it waits for you to go on before answering.",
               kind="number", min=1500, max=10000, step=500, unit="ms", advanced=True),
+        Field("logging.debug", "Debug mode",
+              "Shows what it heard and said under the face or rings, and timings in its console.", kind="switch",
+              advanced=True),
     ],
     "skills": [
         Field("skills", "Skills", kind="skills"),

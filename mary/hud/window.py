@@ -30,7 +30,7 @@ class HudWindow(QWebEngineView):
     level = Signal(float)     # audio level 0..1, sent to the page at most ~30 times a second
     command = Signal(str)     # "activity" | "idle" | "toggle" | "hide_now" | "show_now"
 
-    def __init__(self, cfg):
+    def __init__(self, cfg, show_text: bool = False):
         super().__init__()
         self.cfg = cfg.hud
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
@@ -63,6 +63,11 @@ class HudWindow(QWebEngineView):
 
         self.director = None
         self._last_avatar_frame = None
+        self.show_text(show_text)
+
+    def show_text(self, on: bool) -> None:
+        """The words under the face or rings: in debug mode, or when the voice fails and they're all there is."""
+        self._queue.append(f"hud.textPanel({'true' if on else 'false'})")
 
     # ------------------------------------------------------------------ avatar
 
