@@ -11,12 +11,15 @@
 <body>
 <div class="app">
   <aside class="side">
-    <div class="brand"><span class="reactor" aria-hidden="true"></span><b>MARY</b><span class="muted">Settings</span></div>
     <div class="switcher" id="switcher"></div>
+    <div class="side-search" id="side-search"></div>
     <nav class="nav" id="nav" aria-label="Settings"></nav>
     <div class="side-foot" id="status" aria-live="polite"></div>
   </aside>
-  <main id="main" tabindex="-1"><p class="muted loading">Loading…</p></main>
+  <div class="workspace">
+    <header class="topbar" id="topbar"></header>
+    <main id="main" tabindex="-1"><p class="muted loading">Loading…</p></main>
+  </div>
 </div>
 <div class="bar" id="bar" hidden></div>
 <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>

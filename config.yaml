@@ -93,6 +93,7 @@ skills:
   - waiting         # wait for an app or page that's still starting
   - look            # what a window or photo looks like (a model that can see)
   - documents       # read a PDF, Word, Excel, PowerPoint or text file's text
+  - photos          # find, describe and show photos and moments from your photo library
 
 audio:
   input_device: null        # null = Windows default microphone; or a name/number from `python -m mary.voices --devices`
@@ -327,6 +328,27 @@ photos:
     group: 0.45             # unnamed groups at least this alike (on average) are one
     alone: 0.05             # a single face needs this much more than `group` to join a group
     same: 0.30              # two groups this alike are offered as "the same person?"
+  # Picture search and visual look-alikes (Phase 4: mary/photos/clip.py). CLIP ViT-B/32 via fastembed (ONNX on CPU,
+  # kept in data/models/fastembed). Searches by what a photo shows ("pink car", "beach at sunset").
+  clip:
+    enabled: true
+    models: "{project}/data/models/fastembed"
+    threads: 2
+    min_score: 0.22         # picture-search cosine cutoff
+    similar_score: 0.88     # visual similarity cutoff for "might be the same photo"
+  # Describing what a photo shows (Phase 4: mary/photos/see.py). Numbered boxes ([1], [2]) are drawn on the faces first,
+  # so names only ever come from the face step (`people`). Runs only when the PC is plugged in and idle. A cloud vision
+  # model is refused unless allow_cloud: true (explicit opt-in; photos leave the PC).
+  vision:
+    enabled: false
+    model: ""               # empty = vision.model or smallest local vision model (bonsai-2:2b / qwen3.5:2b)
+    allow_cloud: false      # true = allow sending photos to a cloud vision model
+    idle_s: 120             # wait until nobody has touched the mouse or keyboard for this long
+    only_on_ac: true        # never on battery
+  # Moments (Phase 4: mary/photos/moments.py): photos grouped by time and place into events, best photo first.
+  moments:
+    gap_hours: 8.0          # photos within this many hours (or same place across a weekend) form a moment
+    min_photos: 2
 
 weather:
   # Where check_weather looks. Empty = the weather site guesses from your internet connection (it names your

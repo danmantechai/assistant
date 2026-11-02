@@ -8,6 +8,7 @@ import tempfile
 import pytest
 
 from mary import memory, photos, ready, web
+from mary.photos import clip
 
 os.environ["MARY_USER_DIR"] = tempfile.mkdtemp(prefix="mary-test-user-")
 ready.DESK = ready.StillDesk
@@ -15,6 +16,7 @@ ready.WRITE_LOG = False
 web.ENABLED = False   # never MARY's real browser (browser tests start their own, invisible)
 memory.ENABLED = False   # no memory store in the other tests (memory tests make their own, in a scratch folder)
 photos.ENABLED = False   # and no photo worker
+clip.ENABLED = False     # no automatic CLIP ONNX loading in unrelated photo tests (CLIP tests pass or enable their own)
 
 
 def mom_persona():

@@ -91,7 +91,7 @@ def new_persona(name: str) -> Path:
 # ------------------------------------------------------------------ Character Cards
 
 
-def export_card(key: str, with_voice: bool = False) -> dict:
+def export_card(key: str, with_voice: bool = False, with_face: bool = False) -> dict:
     her = personas.load(key)
     if her.folder is None:
         raise SystemExit(f"No persona {key!r}.")
@@ -103,6 +103,14 @@ def export_card(key: str, with_voice: bool = False) -> dict:
         voice.get("elevenlabs", {}).pop("voice_id", None)  # a voice made from someone's recordings stays yours
     if voice:
         extra["voice"] = voice
+    if with_face:
+        from mary.avatar import store as avatar_store
+        if avatar_store.available(key):
+            try:
+                face_zip = avatar_store.pack(key)
+                extra["face"] = base64.b64encode(face_zip).decode("ascii")
+            except Exception as e:
+                pass
     return {"spec": "chara_card_v2", "spec_version": "2.0", "data": {
         "name": her.name,
         "description": her.soul,      # who they are, how they talk and write: all in the personality
@@ -178,6 +186,13 @@ def persona_from_card(card: dict, name: str | None = None) -> Path:
             lore = folder / "lore" / f"{re.sub(r'[^A-Za-z0-9]+', '_', str(entry.get('name') or f'entry_{i}')).strip('_')}.md"
             lore.parent.mkdir(exist_ok=True)
             lore.write_text(f"keywords: {', '.join(entry['keys'])}\n{fill(entry['content'])}\n", encoding="utf-8")
+    face_b64 = ((d.get("extensions") or {}).get("mary") or {}).get("face")
+    if face_b64:
+        try:
+            from mary.avatar import store as avatar_store
+            avatar_store.unpack(key, base64.b64decode(face_b64))
+        except Exception:
+            pass
     return folder
 
 
@@ -198,6 +213,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("persona")
     p.add_argument("--out", type=Path)
     p.add_argument("--with-voice", action="store_true")
+    p.add_argument("--with-face", action="store_true")
     p = sub.add_parser("import-card")
     p.add_argument("card", type=Path)
     p.add_argument("--as", dest="name")
@@ -215,9 +231,15 @@ def main(argv: list[str] | None = None) -> None:
         print(f"Kept {count} of her messages in {out} (private). A couple are shown to her whenever she writes.")
     elif args.cmd == "export-card":
         out = args.out or Path(f"{args.persona}.card.json")
-        out.write_text(json.dumps(export_card(args.persona, args.with_voice), indent=2, ensure_ascii=False),
+        out.write_text(json.dumps(export_card(args.persona, args.with_voice, args.with_face), indent=2, ensure_ascii=False),
                        encoding="utf-8")
-        print(f"Wrote {out}" + ("" if args.with_voice else " (without your ElevenLabs voice ID)."))
+        notes = []
+        if not args.with_voice:
+            notes.append("without your ElevenLabs voice ID")
+        if not args.with_face:
+            notes.append("without persona face")
+        suffix = f" ({', '.join(notes)})." if notes else "."
+        print(f"Wrote {out}" + suffix)
     elif args.cmd == "import-card":
         folder = import_card(args.card, args.name)
         print(f"Made {folder}. Set  persona: {folder.name}  in user/config.yaml to use it.")

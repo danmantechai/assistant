@@ -22,7 +22,8 @@ from datetime import date
 from pathlib import Path
 
 from mary.logs import write_jsonl
-from mary.photos import copies, dates, faces, read, sources, text
+from mary.memory import idle
+from mary.photos import clip, copies, dates, faces, read, see, sources, text
 from mary.photos.library import PhotoLibrary
 
 RETRY_MODELS_S = 20       # how long to wait before looking again for models that were not there
@@ -31,14 +32,24 @@ log = logging.getLogger(__name__)
 
 
 class Ingest:
-    def __init__(self, lib: PhotoLibrary, busy=lambda: False, engine=None):
+    def __init__(self, lib: PhotoLibrary, busy=lambda: False, engine=None, clip_engine=None,
+                 vision_fn=None, vision_tag: str = ""):
         self.lib = lib
         self.busy = busy
         self.timings: dict[str, list[float]] = {}     # stage -> [count, seconds]
-        self.state = "idle"                           # idle | scanning | reading | text | faces | people
+        self.state = "idle"                           # idle | scanning | reading | text | faces | people | clip | vision
         self.face_counts: Counter = Counter()
         self._engine = engine                         # the face models (loaded once, on this thread, when first needed)
         self._engine_at = 0.0
+        self._clip_engine = clip_engine
+        self._clip_tag = ""
+        if clip_engine is not None:
+            self.lib._clip = clip_engine
+        self._clip_at = 0.0
+        self._vision_fn = vision_fn
+        self._vision_ask = vision_fn
+        self._vision_tag = vision_tag
+        self._moments_dirty = False
         self._flip = False
         self.last_scan = 0.0
         self._wanted = threading.Event()
@@ -109,6 +120,7 @@ class Ingest:
         if rows:
             self.state = "reading"
             self._file(rows[0])
+            self._moments_dirty = True
             return True
         engine = self._faces_engine()
         words = bool(self.lib.setting("read_text")) and text.available()
@@ -119,6 +131,7 @@ class Ingest:
                 if rows:
                     self.state = "faces"
                     self._faces(rows[0], engine)
+                    self._moments_dirty = True
                     return True
             elif kind == "text" and words:
                 rows = self.lib.needing_text(1)
@@ -128,6 +141,19 @@ class Ingest:
                     return True
         if self.lib.people.pending() and self.lib.people.maintain():
             self.state = "people"
+            self._moments_dirty = True
+            return True
+        clip_eng = self._clip_model()
+        if clip_eng is not None:
+            rows = self.lib.needing_clip(clip_eng.tag, 1)
+            if rows:
+                self.state = "clip"
+                self._clip(rows[0], clip_eng)
+                return True
+        if self._moments_dirty:
+            self._moments_dirty = False
+            self.lib.maintain_moments()
+        if self._see():
             return True
         self.state = "idle"
         return False
@@ -147,6 +173,73 @@ class Ingest:
             if self._engine is not None:
                 people.use_model(self._engine.tag)
         return self._engine
+
+    def _clip_model(self):
+        """The CLIP picture-embedding model, when switched on and present on disk (else None)."""
+        if not (self.lib.settings.get("clip") or {}).get("enabled", True):
+            return None
+        if self._clip_engine is None and time.monotonic() - self._clip_at >= RETRY_MODELS_S:
+            self._clip_at = time.monotonic()
+            try:
+                self._clip_engine = clip.load(self.lib)
+            except Exception:
+                log.exception("photo worker: the CLIP models would not load")
+                self._clip_engine = None
+        if self._clip_engine is not None:
+            self.lib._clip = self._clip_engine
+            if self._clip_tag != self._clip_engine.tag:
+                self._clip_tag = self._clip_engine.tag
+                self.lib.use_clip_model(self._clip_engine.tag)
+        return self._clip_engine
+
+    def vision_ready(self) -> bool:
+        """Vision descriptions run only while the PC is idle, plugged into mains power, and MARY is not answering."""
+        if not (self.lib.settings.get("vision") or {}).get("enabled", True):
+            return False
+        if self.busy() or idle.on_battery():
+            return False
+        idle_s = float((self.lib.settings.get("vision") or {}).get("idle_s", 300))
+        return idle.input_idle_seconds() >= idle_s
+
+    def _vision_callable(self) -> tuple:
+        """Return `(ask_fn, model_tag)` if vision is enabled and allowed, else `(None, '')`."""
+        vcfg = self.lib.settings.get("vision") or {}
+        if not vcfg.get("enabled", True):
+            return None, ""
+        model_name = str(vcfg.get("model") or self._vision_tag or "").strip()
+        allow_cloud = bool(vcfg.get("allow_cloud", False))
+        if model_name and see.is_cloud_endpoint(model_name) and not allow_cloud:
+            return None, ""
+        fn = self._vision_ask or self._vision_fn
+        if fn is not None:
+            tag = self._vision_tag or model_name or "vision-1"
+            if see.is_cloud_endpoint(tag) and not allow_cloud:
+                return None, ""
+            return fn, tag
+        return None, ""
+
+    def vision_status(self) -> dict:
+        vcfg = self.lib.settings.get("vision") or {}
+        model_name = str(vcfg.get("model") or self._vision_tag or "").strip()
+        cloud = see.is_cloud_endpoint(model_name) if model_name else False
+        allow_cloud = bool(vcfg.get("allow_cloud", False))
+        seen = self.lib._one(
+            "SELECT count(*) FROM photos WHERE owner=? AND library=? AND seen<>''",
+            (self.lib.owner, self.lib.lib),
+        )[0]
+        total = self.lib._one(
+            "SELECT count(*) FROM photos WHERE owner=? AND library=?",
+            (self.lib.owner, self.lib.lib),
+        )[0]
+        return {
+            "enabled": bool(vcfg.get("enabled", True)),
+            "model": model_name,
+            "cloud": cloud,
+            "allow_cloud": allow_cloud,
+            "cloud_blocked": bool(cloud and not allow_cloud),
+            "seen": seen,
+            "left": max(0, total - seen),
+        }
 
     def _file(self, row) -> None:
         lib, path, fid = self.lib, row["path"], row["id"]
@@ -225,6 +318,71 @@ class Ingest:
             return
         self.face_counts.update(people.add(pid, found, engine.tag))
         self._time("faces", t)
+
+    def _clip(self, row, engine) -> None:
+        """Embed one photo with the CLIP image encoder and store its vector in `vectors` (`space='image'`)."""
+        t = time.perf_counter()
+        pid = row["id"]
+        try:
+            thumb = self.lib.thumb_path(pid)
+            if thumb.exists():
+                vec = engine.embed_image(thumb)
+            else:
+                path = Path(row["path"] or "")
+                if not row["path"] or not path.exists():
+                    self.lib.skip_clip(pid, engine.tag)
+                    return
+                d = read.decode(path.read_bytes(), path.suffix, read.THUMB_PX)
+                vec = engine.embed_image(d.image)
+            if vec is None:
+                self.lib.skip_clip(pid, engine.tag)
+                return
+            self.lib.set_clip(pid, vec, engine.tag)
+        except Exception:
+            log.debug("embedding picture failed for one photo", exc_info=True)
+            self.lib.skip_clip(pid, engine.tag)
+            return
+        self._time("clip", t)
+
+    def _see(self, row=None, ask_fn=None, model_tag: str = "") -> bool:
+        """Draw numbered face boxes `[1]`, `[2]` on one photo, ask the vision model, and save the sanitized description."""
+        if row is None:
+            ask_fn, model_tag = self._vision_callable()
+            if ask_fn is None or not self.vision_ready():
+                return False
+            rows = self.lib.needing_vision(model_tag, 1)
+            if not rows:
+                return False
+            row = rows[0]
+        self.state = "vision"
+        t = time.perf_counter()
+        pid = row["id"]
+        try:
+            path = Path(row["path"] or "")
+            if not row["path"] or not path.exists():
+                self.lib.skip_vision(pid, model_tag)
+                return True
+            d = read.decode(path.read_bytes(), path.suffix, see.MAX_VISION_SIDE)
+            face_rows = self.lib.people.faces_for_vision(pid)
+            forbidden = [
+                r["name"]
+                for r in self.lib._all(
+                    "SELECT name FROM people WHERE owner=? AND library=? AND name<>''",
+                    (self.lib.owner, self.lib.lib),
+                )
+            ]
+            res = see.describe_image(d.image, face_rows, ask_fn, model_tag=model_tag, forbidden_names=forbidden)
+            self.lib.set_seen(pid, res)
+            self.lib.maintain_moments()
+        except (read.Unreadable, OSError):
+            self.lib.skip_vision(pid, model_tag)
+            return True
+        except Exception:
+            log.debug("describing photo by vision failed for one photo", exc_info=True)
+            self.lib.skip_vision(pid, model_tag)
+            return True
+        self._time("vision", t)
+        return True
 
     def drain(self, seconds: float | None = None) -> int:
         """Work until nothing is left (or `seconds` have passed); steps aside while MARY is answering."""

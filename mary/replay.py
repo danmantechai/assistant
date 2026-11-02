@@ -200,8 +200,25 @@ class Replay:
 
         self.front = conv.get("active_window") or FRONT
         self.real = set(conv.get("real") or [])
+        if "photos" in self.real:
+            self.real.update({"find_photos", "show_photo", "about_photo"})
         clock.reset()
-        self._new_memory(scratch_profile=bool(self.real))
+        self._new_memory(scratch_profile=bool(self.real or conv.get("photos")))
+        if conv.get("photos") and self.mary.photos is not None:
+            from mary.photos import synth
+
+            root = Path(tempfile.mkdtemp(prefix="mary-replay-photos-"))
+            synth.populate_moments_library(self.mary.photos, root)
+            if conv.get("persona_link"):
+                plink = conv["persona_link"]
+                target_name = plink.get("person")
+                born_year = int(plink.get("born") or 0)
+                persona_key = getattr(self.mary.agent.persona, "key", "mary")
+                for p in self.mary.photos.people.people():
+                    if p["name"] == target_name:
+                        self.mary.photos.link_persona(persona_key, p["id"], born=born_year)
+                        self.mary.photos.set_self(persona_key)
+                        break
 
     def end(self) -> None:
         from mary.memory import clock
@@ -213,7 +230,7 @@ class Replay:
     def _new_memory(self, scratch_profile: bool) -> None:
         """An empty memory (and with `scratch_profile` an empty profile) for the next conversation, so what one
         conversation told her never reaches another."""
-        from mary import memory
+        from mary import memory, photos
         from mary.memory.diary import Diary
         from mary.profile import Profile
 
@@ -228,6 +245,8 @@ class Replay:
             m.memory.sync_core(profile.facts)
             profile.listeners.append(lambda: m.memory.sync_core(profile.facts))
             m.ctx.memory = m.agent.memory = m.memory
+            m.photos = m.ctx.photos = photos.open_library(self.cfg, m.memory)
+            m.ctx.suppress_open = True
             old.worker.stop()
         m.profile = m.ctx.profile = m.agent.profile = profile
         if scratch_profile:
@@ -240,6 +259,7 @@ class Replay:
         m.offer, m.asked, m.awaiting, m.end_conversation = None, False, None, False
         ctx = m.ctx
         ctx.last_files, ctx.last_files_at, ctx.last_web_at, ctx.screen_elements = [], 0.0, 0.0, []
+        ctx.shown_photos = []
         ctx.seen.clear()
         ctx.request = ctx.prev_request = ""
 

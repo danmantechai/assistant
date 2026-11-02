@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import ctypes
 import logging
+import time
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, QUrl, Signal
@@ -60,6 +61,41 @@ class HudWindow(QWebEngineView):
         self.busy = lambda: False
         self._gone_timer = QTimer(self, singleShot=True, timeout=self._really_hide)
 
+        self.director = None
+        self._last_avatar_frame = None
+
+    # ------------------------------------------------------------------ avatar
+
+    def set_avatar(self, director, persona: str | None = None) -> None:
+        self.director = director
+        self._avatar_persona = persona
+        self._avatar_sig = None
+        self._avatar_checked = 0.0
+        self._check_avatar()
+
+    def _check_avatar(self) -> None:
+        """Send the persona's face to the page when it first loads and whenever it changes on disk (made, replaced,
+        switched on or off, erased), so a change in Settings shows at once, without a restart."""
+        import json
+
+        persona = getattr(self, "_avatar_persona", None)
+        if not persona:
+            return
+        self._avatar_checked = time.monotonic()
+        from mary.avatar import store as avatar_store
+        try:
+            sig = avatar_store.signature(persona)
+        except Exception:
+            return
+        if sig == self._avatar_sig:
+            return
+        self._avatar_sig = sig
+        m = avatar_store.manifest(persona)
+        en = avatar_store.enabled(persona)
+        folder_url = QUrl.fromLocalFile(str(avatar_store.folder(persona))).toString()
+        self._last_avatar_frame = None
+        self._queue.append(f"hud.avatarConfig({json.dumps(m)}, {json.dumps(folder_url)}, {json.dumps(en)})")
+
     # ------------------------------------------------------------------ page bridge
 
     def _on_load(self, ok: bool) -> None:
@@ -76,10 +112,18 @@ class HudWindow(QWebEngineView):
     def _flush(self) -> None:
         if not self._ready:
             return
+        if getattr(self, "_avatar_persona", None) and time.monotonic() - self._avatar_checked > 1.0:
+            self._check_avatar()
         calls, self._queue[:] = list(self._queue), []
         if self._level is not None and self.isVisible():
             calls.append(f"hud.level({self._level:.3f})")
             self._level = None
+        if self.director is not None and self.isVisible():
+            frame = self.director.tick()
+            key = (frame.pose, frame.eyes, frame.mouth)
+            if key != self._last_avatar_frame:
+                calls.append(f"hud.avatarFrame('{frame.pose}', '{frame.eyes}', '{frame.mouth}')")
+                self._last_avatar_frame = key
         if calls:
             self.page().runJavaScript(";".join(calls))
 

@@ -66,7 +66,10 @@ class Mary:
             from mary.photos.ingest import Ingest
 
             self.photos = photos.open_library(cfg, self.memory)
+            self.ctx.photos = self.photos
             if self.photos is not None:
+                if hasattr(self.agent, "persona") and self.agent.persona:
+                    self.photos.set_self(getattr(self.agent.persona, "key", None))
                 self.ingest = Ingest(self.photos, busy=lambda: self._handling > 0)
         self._reply = ""                  # what she said to this request, for the diary
         self._failed = False              # this request couldn't be answered (the model was offline, an error)

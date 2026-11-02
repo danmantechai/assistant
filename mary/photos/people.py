@@ -348,6 +348,8 @@ class People:
                         self.found_more["asked"] += 1
         if touched:
             self._refresh(*touched)
+            for who in touched:
+                self.lib.refresh_seen(self.photo_ids(who))
 
     def _shares_a_photo(self, a: int, b: int) -> bool:
         """Do these two groups have a face in the same photo? Then they are two people."""
@@ -406,6 +408,7 @@ class People:
             c.execute("DELETE FROM people_nots WHERE (kind='same' AND (a=? OR b=?)) OR (kind='face' AND b=?)",
                       (drop, drop, drop))
             c.execute("DELETE FROM people WHERE id=?", (drop,))
+        self.lib.move_persona_links(drop, keep)
         self._gal().drop(drop)
         self._dirty.discard(drop)
         self._dirty.add(keep)
@@ -513,6 +516,29 @@ class People:
                 "faces": [{"id": r["id"], "person": r["person_id"], "name": r["name"] if r["state"] == "named" else "",
                            "v": r["created"].replace(":", "").replace("-", "")} for r in rows if r["usable"]]}
 
+    def faces_for_vision(self, photo_id: int) -> list[dict]:
+        """The usable faces in `photo_id` ordered strictly left-to-right (`[1]`, `[2]`, ...) for drawing vision boxes."""
+        rows = self._all(
+            "SELECT f.id, f.x, f.y, f.w, f.h, f.person_id, coalesce(p.name, '') AS name, coalesce(p.state, '') AS state "
+            "FROM photo_faces f LEFT JOIN people p ON p.id=f.person_id "
+            "WHERE f.photo_id=? AND f.owner=? AND f.library=? AND f.usable=1 ORDER BY f.x, f.y, f.id",
+            (photo_id, self.owner, self.library),
+        )
+        return [
+            {
+                "num": idx,
+                "id": int(r["id"]),
+                "person_id": r["person_id"],
+                "name": r["name"] if r["state"] == "named" else "",
+                "box": (float(r["x"]), float(r["y"]), float(r["w"]), float(r["h"])),
+                "x": float(r["x"]),
+                "y": float(r["y"]),
+                "w": float(r["w"]),
+                "h": float(r["h"]),
+            }
+            for idx, r in enumerate(rows, start=1)
+        ]
+
     def questions(self, per: int = 12) -> list[dict]:
         """"Is this Ama?": faces that might be a person you named, not given to them until you say. One entry per person."""
         out = []
@@ -577,6 +603,7 @@ class People:
                 c.execute("UPDATE photo_faces SET suggest_id=NULL, suggest_score=NULL WHERE suggest_id=person_id")
             self.request_look_again()
             self._same = None
+            self.lib.refresh_seen(self.photo_ids(pid))
             return self.person(pid)
 
     def set_relation(self, pid: int, relation: str) -> dict:
@@ -595,12 +622,14 @@ class People:
             row = self._need(pid)
             if row["state"] != "named":
                 raise PhotoError("They don't have a name.")
+            photos_of = self.photo_ids(pid)
             with self.db.tx() as c:
                 c.execute("UPDATE people SET name='', relation='', state='unnamed', updated=? WHERE id=?",
                           (_iso(clock.now()), pid))
                 c.execute("UPDATE photo_faces SET suggest_id=NULL, suggest_score=NULL WHERE suggest_id=?", (pid,))
             self._dirty.add(pid)
             self._same = None
+            self.lib.refresh_seen(photos_of)
             return self.person(pid)
 
     def ignore(self, pid: int) -> dict:
@@ -641,6 +670,7 @@ class People:
             if stay["state"] == "named":
                 self.request_look_again()
             self._same = None
+            self.lib.refresh_seen(self.photo_ids(stay["id"]))
             return self.person(stay["id"])
 
     def split(self, pid: int, face_ids: list[int]) -> dict:
@@ -664,6 +694,7 @@ class People:
                                   [(self.owner, self.library, "face", i, pid, now) for i in ids])
             self._refresh(pid, new)
             self._same = None
+            self.lib.refresh_seen(self.photo_ids(pid) + self.photo_ids(new))
             return self.person(new)
 
     def _mine(self, face_ids, pid: int) -> list[int]:
@@ -683,13 +714,14 @@ class People:
             target = self._need(pid)
             if not isinstance(face_ids, list) or not face_ids or not all(isinstance(i, int) for i in face_ids):
                 raise PhotoError("Pick some faces first.")
-            rows = self._all(f"SELECT id, person_id FROM photo_faces WHERE usable=1 AND owner=? AND library=? AND id IN "
+            rows = self._all(f"SELECT id, photo_id, person_id FROM photo_faces WHERE usable=1 AND owner=? AND library=? AND id IN "
                              f"({','.join('?' * len(face_ids))})", (self.owner, self.library, *face_ids))
             if not rows:
                 raise PhotoError("Those faces aren't there any more.")
             states = self._states()
             now = _iso(clock.now())
             before = {r["person_id"] for r in rows if r["person_id"] not in (None, pid)}
+            affected_photos = list({r["photo_id"] for r in rows})
             with self.db.tx() as c:
                 for r in rows:
                     if r["person_id"] not in (None, pid) and states.get(r["person_id"]) == "named":
@@ -703,6 +735,7 @@ class People:
             if target["state"] == "named":
                 self.request_look_again()
             self._same = None
+            self.lib.refresh_seen(affected_photos)
             return self.person(pid)
 
     def deny(self, face_ids: list[int], pid: int) -> int:
@@ -739,6 +772,7 @@ class People:
         copies MARY keeps before a format change. The photos stay, and are not read for faces again unless you ask."""
         with self._lock:
             self._need(pid)
+            affected_photos = self.photo_ids(pid)
             ids = [r["id"] for r in self._all("SELECT id FROM photo_faces WHERE person_id=?", (pid,))]
             with self.db.tx() as c:
                 self._delete_faces(ids)
@@ -749,6 +783,8 @@ class People:
             self._gal().drop(pid)
             self._dirty.discard(pid)
             self._same = None
+            self.lib.drop_persona_links([pid])      # a face made from them is a copy of theirs: it goes too
+            self.lib.refresh_seen(affected_photos)
             self.lib.store._scrub()
             self._scrub_backups(ids, [pid])
             return {"faces": len(ids)}
@@ -767,6 +803,8 @@ class People:
             self._gallery, self._queue, self._dirty, self._same, self._look_again = None, [], set(), None, False
             self.set_enabled(False)
             shutil.rmtree(self.lib.dir / "faces", ignore_errors=True)
+            self.lib.drop_persona_links(None)
+            self.lib.refresh_seen()
             self.lib.store._scrub()
             self._scrub_backups(None, None)
             return {"faces": n}

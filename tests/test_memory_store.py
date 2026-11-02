@@ -304,3 +304,43 @@ def test_a_file_missing_a_column_of_an_earlier_format_is_brought_level(tmp_path)
     s = MemoryStore(path, backups=tmp_path / "b")
     assert "exif_taken" in {r[1] for r in s.db.conn().execute("PRAGMA table_info(photos)")}
     s.close()
+
+
+def test_v5_migration_and_column_repair_bring_older_photo_and_moment_tables_level(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "m.db"
+    c = sqlite3.connect(path)
+    dbmod._v1(c)
+    dbmod._v2(c)
+    dbmod._v3(c)
+    dbmod._v4(c)
+    c.execute("INSERT INTO photos(owner, library, sha, dhash, width, height, text, caption, album, place, region, country, added, updated) "
+              "VALUES ('o', 'l', 's1', '0000000000000000', 640, 480, 'CAFE', 'holiday', 'Trip', 'Harbourton', '', 'Ghanaland', '2025-01-01', '2025-01-01')")
+    c.execute("PRAGMA user_version = 4")
+    c.commit()
+    c.close()
+
+    # Opening upgrades v4 -> v5, preserves the photo, adds all v5 columns, creates moments tables, and rebuilds photos_fts
+    s = MemoryStore(path, backups=tmp_path / "b")
+    cols = {r[1] for r in s.db.conn().execute("PRAGMA table_info(photos)")}
+    assert {"sharpness", "image_model", "seen_model", "seen_raw", "seen_faces", "seen", "tags"} <= cols
+    tables = {r[0] for r in s.db.conn().execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert {"moments", "moment_photos", "moment_nots"} <= tables
+    assert s.db.conn().execute("SELECT count(*) FROM photos_fts WHERE photos_fts MATCH 'holiday'").fetchone()[0] == 1
+    s.close()
+
+    # Even if an already-v5 database loses columns from photos or moments, opening repairs them automatically
+    c = sqlite3.connect(path)
+    c.execute("ALTER TABLE photos DROP COLUMN seen")
+    c.execute("ALTER TABLE photos DROP COLUMN image_model")
+    c.execute("ALTER TABLE moments DROP COLUMN theme")
+    c.execute("ALTER TABLE moments DROP COLUMN mentions")
+    c.execute("ALTER TABLE moments DROP COLUMN last_mentioned")
+    c.commit()
+    c.close()
+    s = MemoryStore(path, backups=tmp_path / "b")
+    assert {"seen", "image_model"} <= {r[1] for r in s.db.conn().execute("PRAGMA table_info(photos)")}
+    assert {"theme", "mentions", "last_mentioned"} <= {r[1] for r in s.db.conn().execute("PRAGMA table_info(moments)")}
+    s.close()
+

@@ -58,6 +58,7 @@ class Facts:
     lat: float | None
     lon: float | None
     size: int
+    sharpness: float = 0.0
 
 
 # ---------------------------------------------------------------- what the camera wrote
@@ -281,6 +282,15 @@ def hamming(a: int, b: int) -> int:
     return (a ^ b).bit_count()
 
 
+def sharpness(image: Image.Image) -> float:
+    """0..1: how sharp the picture is (variance of the discrete Laplacian on a small grey copy)."""
+    g = np.asarray(image.convert("L"), dtype=np.float32)
+    if g.shape[0] < 4 or g.shape[1] < 4:
+        return 0.0
+    lap = g[:-2, 1:-1] + g[2:, 1:-1] + g[1:-1, :-2] + g[1:-1, 2:] - 4.0 * g[1:-1, 1:-1]
+    return round(min(1.0, float(lap.var()) / 1500.0), 4)
+
+
 def thumbnail(image: Image.Image, px: int = THUMB_PX) -> bytes:
     t = image.copy()
     t.thumbnail((px, px), Image.Resampling.LANCZOS)
@@ -304,7 +314,7 @@ def read_file(path: Path) -> Facts:
         raise Unreadable("couldn't be opened") from None
     d = decode(data, ext)
     return Facts(hashlib.sha256(data).hexdigest(), f"{dhash(d.image):016x}", d.width, d.height, thumbnail(d.image),
-                 d.taken, d.taken_exact, d.lat, d.lon, size)
+                 d.taken, d.taken_exact, d.lat, d.lon, size, sharpness(d.image))
 
 
 def windows_can_read_heic() -> bool:

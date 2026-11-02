@@ -229,7 +229,7 @@ def persona_prompt(srv, m, *_):
 
 
 def persona_card(srv, m, body, q):
-    card = persona_io.export_card(store.check_name(m["key"]), with_voice=q.get("voice") == ["1"])
+    card = persona_io.export_card(store.check_name(m["key"]), with_voice=q.get("voice") == ["1"], with_face=q.get("face") == ["1"])
     data = json.dumps(card, indent=2, ensure_ascii=False).encode("utf-8")
     return data, "application/json", f"{m['key']}.card.json"
 
@@ -282,6 +282,123 @@ def persona_import(srv, m, body, q):
         raise store.SettingsError(f"You already have a persona called {key}; give this one another name.")
     persona_io.persona_from_card(card, key)
     return {"key": key, "state": state(srv)}
+
+
+def persona_link_get(srv, m, *_):
+    lib, _ = srv.photos()
+    if lib is None:
+        return {"link": None}
+    return {"link": lib.persona_link(m["key"])}
+
+
+def persona_link_set(srv, m, body, q):
+    lib, _ = srv.photos()
+    if lib is None:
+        raise store.SettingsError("Photos are not turned on.")
+    pid = body.get("person_id")
+    pid = int(pid) if pid is not None and str(pid).strip() else None
+    born = int(body.get("born") or 0)
+    try:
+        link = lib.link_persona(m["key"], pid, born=born)
+    except Exception as e:
+        raise store.SettingsError(str(e)) from e
+    return {"link": link}
+
+
+def persona_face_get(srv, m, *_):
+    from mary.avatar import store as avatar_store
+    k = m["key"]
+    return {"available": avatar_store.available(k), "enabled": avatar_store.enabled(k)}
+
+
+def persona_face_set(srv, m, body, q):
+    from mary.avatar import store as avatar_store
+    k = m["key"]
+    on = bool(body.get("enabled", True))
+    try:
+        avatar_store.set_enabled(k, on)
+    except Exception as e:
+        raise store.SettingsError(str(e)) from e
+    return {"available": avatar_store.available(k), "enabled": avatar_store.enabled(k)}
+
+
+def persona_face_delete(srv, m, *_):
+    from mary.avatar import store as avatar_store
+    k = m["key"]
+    avatar_store.erase(k)
+    return {"available": False, "enabled": False}
+
+
+def _face_engine(lib):
+    """The People page's face finder, from the library's own settings (None: its models aren't on this PC yet)."""
+    from mary.photos import faces
+
+    return faces.load(lib)
+
+
+def persona_face_check(srv, m, body, q):
+    lib, _ = srv.photos()
+    if lib is None:
+        raise store.SettingsError("Photos are not turned on.")
+    pid = int(body.get("photo_id") or 0)
+    paths = [p for p in lib.file_paths(pid) if Path(p).exists()]
+    if not paths:
+        raise store.SettingsError("Photo file isn't on this PC right now.")
+    from PIL import Image
+    from mary.avatar.check import check_photo
+    try:
+        with Image.open(paths[0]) as img:
+            img.load()
+            res = check_photo(img, target_person_id=body.get("person_id"), engine=_face_engine(lib))
+    except Exception as e:
+        return {"ok": False, "reason": str(e)}
+    return {"ok": res.ok, "reason": res.reason, "face_px": list(res.face_px), "sharpness": round(res.sharpness, 1)}
+
+
+def persona_face_prepare(srv, m, body, q):
+    lib, _ = srv.photos()
+    if lib is None:
+        raise store.SettingsError("Photos are not turned on.")
+    photo_id = int(body.get("photo_id") or 0)
+    person_id = body.get("person_id")
+    person_id = int(person_id) if person_id is not None and str(person_id).strip() else None
+    k = m["key"]
+    paths = [p for p in lib.file_paths(photo_id) if Path(p).exists()]
+    if not paths:
+        raise store.SettingsError("Photo file isn't on this PC right now.")
+    from PIL import Image
+    from mary.avatar import store as avatar_store
+    from mary.avatar.prepare import prepare_face
+    manifest = {}
+    try:
+        with Image.open(paths[0]) as img:
+            img.load()
+            folder = prepare_face(img, k, photo_id=photo_id, person_id=person_id, engine=_face_engine(lib))
+            mf_path = folder / "manifest.json"
+            if mf_path.is_file():
+                manifest = json.loads(mf_path.read_text(encoding="utf-8"))
+            avatar_store.set_enabled(k, True)
+            if person_id is not None:
+                cur_link = lib.persona_link(k)
+                if cur_link is None or cur_link.get("person_id") != person_id:
+                    lib.link_persona(k, person_id)
+    except Exception as e:
+        raise store.SettingsError(str(e)) from e
+    return {"ok": True, "available": True, "enabled": True, "manifest": manifest}
+
+
+def avatar_view(srv, m, *_):
+    from mary.avatar import store as avatar_store
+    k, fn = m["key"], m["file"]
+    folder = avatar_store.folder(k)
+    if fn in ("base.webp", "center.webp"):
+        p = folder / "pose_center.webp"
+    else:
+        p = folder / fn
+    if not p.is_file():
+        raise store.SettingsError("File not found.")
+    kind = "application/json" if fn.endswith(".json") else "image/webp"
+    return p.read_bytes(), kind, None
 
 
 def _arg(q, name, default=""):
@@ -422,6 +539,34 @@ def photos_places(srv, m, body, q):
     return photos_page.get_places(srv.photos()[0])
 
 
+def photos_clip(srv, m, body, q):
+    return photos_page.get_clip(*srv.photos())
+
+
+def photos_vision(srv, m, body, q):
+    return photos_page.vision_switch(*srv.photos(), body)
+
+
+def photos_moments(srv, m, body, q):
+    return photos_page.moments(srv.photos()[0], q)
+
+
+def photos_moment(srv, m, body, q):
+    return photos_page.moment(srv.photos()[0], m["id"])
+
+
+def photos_moment_rename(srv, m, body, q):
+    return photos_page.moment_rename(srv.photos()[0], body)
+
+
+def photos_moment_merge(srv, m, body, q):
+    return photos_page.moment_merge(srv.photos()[0], body)
+
+
+def photos_moment_split(srv, m, body, q):
+    return photos_page.moment_split(srv.photos()[0], body)
+
+
 def photos_scan(srv, m, body, q):
     return photos_page.scan(*srv.photos())
 
@@ -529,6 +674,18 @@ def sample(srv, m, body, q):
     return _wav(np.asarray(audio, dtype=np.float32)), "audio/wav", None
 
 
+def sample_visemes(srv, m, body, q):
+    """A voice sample with its mouth shapes, timed the way the HUD times them (one synthesis: ElevenLabs costs credits)."""
+    from mary.avatar.visemes import analyze_visemes
+
+    data = sample(srv, m, body, q)[0]
+    with wave.open(io.BytesIO(data)) as w:
+        rate = w.getframerate()
+        pcm = np.frombuffer(w.readframes(w.getnframes()), np.int16).astype(np.float32) / 32768.0
+    return {"audio": base64.b64encode(data).decode("ascii"),
+            "cues": [[round(t, 3), shape] for t, shape in analyze_visemes(pcm, sample_rate=rate)]}
+
+
 def wake_plan(srv, m, body, q):
     return wake.plan((q.get("phrase") or [""])[0])
 
@@ -587,6 +744,14 @@ ROUTES = [(method, re.compile(pattern), fn) for method, pattern, fn in [
     ("POST", rf"/api/personas/{_KEY}/texts/inspect", texts_inspect),
     ("POST", rf"/api/personas/{_KEY}/texts", texts_import),
     ("POST", rf"/api/personas/{_KEY}/texts/delete", texts_delete),
+    ("GET", rf"/api/personas/{_KEY}/link", persona_link_get),
+    ("POST", rf"/api/personas/{_KEY}/link", persona_link_set),
+    ("GET", rf"/api/personas/{_KEY}/face", persona_face_get),
+    ("POST", rf"/api/personas/{_KEY}/face", persona_face_set),
+    ("POST", rf"/api/personas/{_KEY}/face/delete", persona_face_delete),
+    ("POST", rf"/api/personas/{_KEY}/face/check", persona_face_check),
+    ("POST", rf"/api/personas/{_KEY}/face/prepare", persona_face_prepare),
+    ("GET", rf"/avatar/{_KEY}/(?P<file>[a-z0-9_]+\.(?:webp|json))", avatar_view),
     ("POST", r"/api/profile", profile_save),
     ("GET", r"/api/memory", memory_state),
     ("GET", r"/api/memory/list", memory_list),
@@ -603,6 +768,13 @@ ROUTES = [(method, re.compile(pattern), fn) for method, pattern, fn in [
     ("POST", r"/api/photos/folders", photos_add),
     ("POST", r"/api/photos/scan", photos_scan),
     ("POST", r"/api/photos/places", photos_places),
+    ("POST", r"/api/photos/clip", photos_clip),
+    ("POST", r"/api/photos/vision", photos_vision),
+    ("GET", r"/api/photos/moments", photos_moments),
+    ("GET", r"/api/photos/moments/(?P<id>\d+)", photos_moment),
+    ("POST", r"/api/photos/moments/rename", photos_moment_rename),
+    ("POST", r"/api/photos/moments/merge", photos_moment_merge),
+    ("POST", r"/api/photos/moments/split", photos_moment_split),
     ("GET", r"/api/photos/list", photos_list),
     ("GET", r"/api/photos/facets", photos_facets),
     ("POST", r"/api/photos/fix", photos_fix),
@@ -635,6 +807,7 @@ ROUTES = [(method, re.compile(pattern), fn) for method, pattern, fn in [
     ("POST", r"/api/keys", key_save),
     ("GET", r"/api/credits", credits),
     ("POST", r"/api/sample", sample),
+    ("POST", r"/api/sample/visemes", sample_visemes),
     ("GET", r"/api/wake/plan", wake_plan),
     ("POST", r"/api/wake/take", wake_take),
     ("POST", r"/api/wake/pause", wake_pause),
@@ -664,7 +837,7 @@ class Handler(BaseHTTPRequestHandler):
     def _refused(self) -> str | None:
         if self.headers.get("Host") not in self.server.hosts:
             return "This page only answers at 127.0.0.1."
-        if self.path.startswith(("/thumb/", "/view/", "/face/")) and self.headers.get("Sec-Fetch-Site") != "same-origin":
+        if self.path.startswith(("/thumb/", "/view/", "/face/", "/avatar/")) and self.headers.get("Sec-Fetch-Site") != "same-origin":
             return "Pictures are only for this page."   # an <img> sends no X-MARY header; the browser says who asked
         if self.path.startswith("/api/"):
             if self.headers.get("X-MARY") != "1":

@@ -18,7 +18,7 @@ from types import ModuleType
 
 ALL = ["apps", "windows", "sound_screen", "media", "pc_status", "power", "web", "files", "keyboard", "screenshot",
        "notes", "timers", "powershell", "read_screen", "music", "messages", "weather", "screen_control", "memory",
-       "clock", "calculate", "waiting", "look", "documents"]
+       "clock", "calculate", "waiting", "look", "documents", "photos"]
 
 
 def enabled(cfg) -> list[str]:

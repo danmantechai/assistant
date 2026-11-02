@@ -1,0 +1,20 @@
+# Photo moments recalled in conversation (Phase 5). Uses a scratch photo library seeded with synthetic moments
+# (June 1998 wedding on the coast with Grandma & Kofi, May 2021 weekend in Northfield with Kofi, Christmas 2023 in
+# Harbourton with Grandma & Ama, and 1990s scans). Nothing here is real.
+name: Photo moments in conversation
+real: [memory, photos]
+photos: moments_set
+turns:
+  - user: "Do you remember the wedding on the coast in June 1998? Who was there and when was it?"
+    expect:
+      mentions: ["Grandma", "Kofi", "I think|estimate"]
+      avoid: [web, open_app, find_files]
+  - user: "Show me a photo from Christmas 2023 in Harbourton."
+    expect:
+      tools: [show_photo]
+      mentions: ["Grandma|Ama|Harbourton|Christmas"]
+      avoid: [web, open_app]
+  - user: "Do we have any photos from 1985?"
+    expect:
+      mentions: ["don't have|do not have|no photos|none from 1985|aren't any"]
+      avoid: [web, open_app, show_photo]

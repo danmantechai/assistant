@@ -48,6 +48,47 @@ def wants_history(text: str) -> bool:
     return bool(_HISTORY.search(text))
 
 
+_PHOTO_MOMENT_CUE = re.compile(
+    r"\b(?:photos?|pictures?|shots?|albums?|moments?|remember\s+when|wedding|birthday|christmas|easter|graduation|"
+    r"holiday|vacation|trip|picnic|barbecue|bbq|concert|festival|hike|camping|beach|coast|harbou?r|"
+    r"summer|winter|spring|autumn|fall)\b",
+    re.I,
+)
+
+
+def seeks_photo_moments(lib, text: str, today=None, *, cue: bool | None = None) -> bool:
+    """Fast gate (<0.1 ms on unrelated requests): is `text` talking about a past moment, date, place, person, or photo?"""
+    if lib is None or not text:
+        return False
+    vocab = lib.recall_vocab()
+    if not vocab.get("has_photos"):
+        return False
+    today = today or clock.now().date()
+    if cue is None:
+        cue = seeks_memory(text, today)
+    if cue or _PHOTO_MOMENT_CUE.search(text):
+        return True
+    from mary.photos import dates
+
+    if dates.parse_query_when(text, today) is not None:
+        return True
+    self_p = lib.self_person() if hasattr(lib, "self_person") else None
+    if self_p and self_p.get("born"):
+        if dates.parse_age_when(text, int(self_p["born"]), today) is not None:
+            return True
+    low = text.lower()
+    for _, _, low_name in vocab.get("people") or ():
+        if low_name and low_name in low and re.search(rf"\b{re.escape(low_name)}\b", low):
+            return True
+    for pl in vocab.get("places") or ():
+        if pl and pl in low and re.search(rf"\b{re.escape(pl)}\b", low):
+            return True
+    themes = vocab.get("themes")
+    if themes and (themes & set(re.findall(r"[a-z]{3,}", low))):
+        return True
+    return False
+
+
 def describe(h) -> str:
     m = h.memory
     day = m.happened.strftime("%a %d %b")
@@ -79,4 +120,15 @@ def lines(store: MemoryStore, request: str, now: datetime | None = None) -> list
         if out and sum(map(len, out)) + len(line) > budget:
             break
         out.append(line[:int(budget)])
+
+    lib = getattr(store, "photos", None)
+    if lib is not None:
+        try:
+            if seeks_photo_moments(lib, request, now.date(), cue=cue):
+                moments = lib.moments_store.recall_for_request(request, now=now, limit=3)
+                for m in moments[:3]:
+                    out.append(lib.moments_store.describe_for_context(m))
+        except Exception:
+            log.exception("photo moment recall failed")
     return out
+

@@ -230,3 +230,127 @@ def label(t: Taken) -> str:
         return f"{calendar.month_name[s.month]} {s.year}"
     out = f"{s.day} {calendar.month_name[s.month]} {s.year}"
     return out + (f", {s:%H:%M}" if t.precision == "second" else "")
+
+
+@dataclass(frozen=True)
+class QueryWhen:
+    start: datetime
+    end: datetime
+    label: str
+    span: tuple[int, int] = (0, 0)
+    explicit: bool = True      # True when a specific year/decade/month/day was named; False for relative phrases like 'last Christmas'
+    holiday: str = ""          # e.g. 'christmas' when the query asked about Christmas
+    derived: bool = False      # worked out (from a birth year), not said: she says so
+
+
+_SEASONS = {
+    "spring": (3, 6),
+    "summer": (6, 9),
+    "autumn": (9, 12),
+    "fall": (9, 12),
+    "winter": (12, 3),
+}
+
+
+def parse_query_when(text: str, today: date | None = None) -> QueryWhen | None:
+    """Find a date or time period mentioned in a question or search query ('June 1998', 'Christmas 2023',
+    'last Christmas', 'the 1990s', '1985', 'summer 2021', 'last year')."""
+    if not text or not text.strip():
+        return None
+    today = today or clock_today()
+    low = text.lower()
+
+    # 1. Explicit season + year ('summer 2021', 'in the summer of 1998')
+    if m := re.search(rf"\b(spring|summer|autumn|fall|winter)\b(?:\s+of)?\s+{_YEAR}", low):
+        season, y = m[1], int(m[2])
+        if MIN_YEAR <= y <= today.year:
+            m_start, m_end = _SEASONS[season]
+            start = datetime(y, m_start, 1)
+            end = datetime(y + 1, m_end, 1) if m_end < m_start else datetime(y, m_end, 1)
+            return QueryWhen(start, end, f"{season} {y}", m.span(), explicit=True, holiday=season)
+
+    # 2. Explicit Christmas + year ('Christmas 2023', 'Christmas of 2019')
+    if m := re.search(rf"\bchristmas\b(?:\s+of)?[ ,._-]*{_YEAR}", low):
+        y = int(m[1])
+        if MIN_YEAR <= y <= today.year:
+            t = make(datetime(y, 12, 1), "month", "person")
+            return QueryWhen(t.start, t.end, f"Christmas {y}", m.span(), explicit=True, holiday="christmas")
+
+    # 3. Relative Christmas ('last Christmas', 'this Christmas')
+    if m := re.search(r"\b(last|this)\s+christmas\b", low):
+        y = today.year - 1 if m[1] == "last" else today.year
+        t = make(datetime(y, 12, 1), "month", "person")
+        return QueryWhen(t.start, t.end, f"{m[1]} Christmas", m.span(), explicit=False, holiday="christmas")
+
+    # 4. Relative season ('last summer', 'this summer', 'last winter')
+    if m := re.search(r"\b(last|this)\s+(spring|summer|autumn|fall|winter)\b", low):
+        which, season = m[1], m[2]
+        y = today.year - 1 if which == "last" else today.year
+        m_start, m_end = _SEASONS[season]
+        start = datetime(y, m_start, 1)
+        end = datetime(y + 1, m_end, 1) if m_end < m_start else datetime(y, m_end, 1)
+        return QueryWhen(start, end, f"{which} {season}", m.span(), explicit=False, holiday=season)
+
+    # 5. Any explicit date, month+year, decade ('1990s'), or year ('1998') that `from_folder_name` understands
+    t = from_folder_name(text, today)
+    if t.known:
+        # Find the matched span so callers can strip the date words from the query if needed
+        span = (0, 0)
+        for pat in (
+            rf"{_YEAR}[-_. ](0[1-9]|1[0-2])[-_. ](0[1-9]|[12]\d|3[01])(?!\d)",
+            rf"(?<!\d)(\d{{1,2}})(?:st|nd|rd|th)?[ -]({_MONTH_NAMES})[a-z]*[ ,-]*{_YEAR}",
+            rf"\b({_MONTH_NAMES})\b[a-z]*[ ,._-]*{_YEAR}",
+            rf"{_YEAR}[-_. ](0[1-9]|1[0-2])(?!\d)",
+            rf"(?<!\d)(0[1-9]|1[0-2])[-_. ]{_YEAR}",
+            r"\b(?:the\s+)?(?<!\d)((?:19|20)\d)0s\b",
+            _YEAR,
+        ):
+            if sm := re.search(pat, low):
+                span = sm.span()
+                break
+        return QueryWhen(t.start, t.end, label(t), span, explicit=True)
+
+    # 6. Relative conversational expressions ('last year', 'two years ago', 'last month', 'yesterday')
+    from mary.memory import when as mem_when
+
+    pr = mem_when.past_range(text, today, cue=False)
+    if pr is not None:
+        start, end, lbl, span = pr
+        has_year = bool(re.search(_YEAR, low))
+        return QueryWhen(start, end, lbl, span, explicit=has_year)
+
+    return None
+
+
+_AGES = (
+    (re.compile(r"\byour\s+(\d{1,3}(?:st|nd|rd|th))\s+(?:birthday|b-?day)\b"), 0),      # the year they turned it
+    (re.compile(r"\byou\s+turned\s+(\d{1,3})\b"), 0),
+    (re.compile(r"\bwhen\s+you\s+were\s+(\d{1,3})\b"), 1),                              # ...until the next birthday: two years
+)
+
+
+def parse_age_when(text: str, born: int, today: date | None = None) -> QueryWhen | None:
+    """A time in the life of the person a persona is modelled on, from their birth year ('your 60th birthday', 'when you were
+    30'). Only the persona's own age counts: 'my 60th birthday' is someone else's. Worked out, so it says so."""
+    if not text or not born:
+        return None
+    today = today or clock_today()
+    low = text.lower()
+    for pattern, extra in _AGES:
+        m = pattern.search(low)
+        if not m:
+            continue
+        age = int(re.match(r"\d+", m[1])[0])
+        year = born + age
+        if not MIN_YEAR <= year <= today.year or age > 120:
+            return None
+        return QueryWhen(datetime(year, 1, 1), datetime(year + 1 + extra, 1, 1),
+                         f"{year}" + (f" to {year + 1}" if extra else ""), m.span(1), explicit=True, derived=True)
+    return None
+
+
+def clock_today() -> date:
+    from mary.memory import clock
+
+    return clock.now().date()
+

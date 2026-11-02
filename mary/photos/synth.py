@@ -432,3 +432,349 @@ def bulk(root: Path, n: int = 500, seed: int = 1, size: tuple[int, int] = (2000,
         made["files"] += 1
         made["photos"] += 1
     return made
+
+
+# ---------------------------------------------------------------- invented scenes, picture embeddings, and moments (Phase 4)
+
+
+def scene_picture(kind: str, seed: int = 0, size: tuple[int, int] = (480, 320)) -> Image.Image:
+    """An invented picture of a recognizable scene ('pink car', 'beach at sunset', 'birthday cake', 'harbour boat',
+    'snowy mountain'), drawn by code so both StandInClip and the real CLIP model can tell them apart."""
+    w, h = size
+    rng = random.Random(seed)
+    dx = rng.randint(-6, 6)
+    dy = rng.randint(-4, 4)
+    img = Image.new("RGB", (w, h), (200, 220, 240))
+    draw = ImageDraw.Draw(img)
+    k = kind.lower().strip()
+    if "pink car" in k or "car" in k:
+        draw.rectangle((0, 0, w, int(h * 0.62)), fill=(175, 215, 250))
+        draw.rectangle((0, int(h * 0.62), w, h), fill=(70, 72, 78))
+        draw.rectangle((0, int(h * 0.80), w, int(h * 0.82)), fill=(235, 215, 90))
+        cx0, cx1 = int(w * 0.16) + dx, int(w * 0.84) + dx
+        cy0, cy1 = int(h * 0.45) + dy, int(h * 0.72) + dy
+        draw.rounded_rectangle((cx0, cy0, cx1, cy1), radius=18, fill=(255, 85, 165), outline=(190, 35, 110), width=3)
+        draw.polygon([(int(w * 0.28) + dx, cy0), (int(w * 0.37) + dx, int(h * 0.27) + dy),
+                      (int(w * 0.66) + dx, int(h * 0.27) + dy), (int(w * 0.75) + dx, cy0)],
+                     fill=(255, 105, 180), outline=(190, 35, 110))
+        draw.polygon([(int(w * 0.38) + dx, cy0 - 3), (int(w * 0.41) + dx, int(h * 0.30) + dy),
+                      (int(w * 0.63) + dx, int(h * 0.30) + dy), (int(w * 0.69) + dx, cy0 - 3)],
+                     fill=(195, 230, 250))
+        for wx in (int(w * 0.30) + dx, int(w * 0.70) + dx):
+            r = int(h * 0.11)
+            draw.ellipse((wx - r, cy1 - r // 2, wx + r, cy1 + r + r // 2), fill=(25, 25, 28))
+            draw.ellipse((wx - r // 2, cy1, wx + r // 2, cy1 + r), fill=(190, 195, 200))
+    elif "beach" in k or "sunset" in k:
+        for y in range(int(h * 0.58)):
+            t = y / max(1, int(h * 0.58))
+            col = (int(255 - 30 * t), int(90 + 110 * t), int(60 + 40 * (1 - t)))
+            draw.line([(0, y), (w, y)], fill=col)
+        sx, sy, sr = w // 2 + dx * 2, int(h * 0.46) + dy, int(h * 0.14)
+        draw.ellipse((sx - sr, sy - sr, sx + sr, sy + sr), fill=(255, 230, 90))
+        draw.rectangle((0, int(h * 0.56), w, int(h * 0.78)), fill=(25, 95, 145))
+        for i in range(6):
+            wy = int(h * 0.58) + i * int(h * 0.03)
+            draw.line([(sx - sr + i * 4, wy), (sx + sr - i * 4, wy)], fill=(255, 200, 95), width=3)
+        draw.polygon([(0, int(h * 0.76)), (w, int(h * 0.72)), (w, h), (0, h)], fill=(232, 198, 135))
+    elif "cake" in k or "birthday" in k or "candle" in k:
+        draw.rectangle((0, 0, w, h), fill=(35, 28, 42))
+        draw.ellipse((int(w * 0.18), int(h * 0.76), int(w * 0.82), int(h * 0.90)), fill=(235, 235, 240))
+        draw.rounded_rectangle((int(w * 0.25) + dx, int(h * 0.50) + dy, int(w * 0.75) + dx, int(h * 0.82) + dy),
+                               radius=12, fill=(245, 205, 165), outline=(180, 120, 80), width=3)
+        draw.rounded_rectangle((int(w * 0.25) + dx, int(h * 0.48) + dy, int(w * 0.75) + dx, int(h * 0.56) + dy),
+                               radius=10, fill=(255, 245, 250))
+        for i in range(5):
+            cx = int(w * (0.33 + i * 0.085)) + dx
+            cy = int(h * 0.48) + dy
+            draw.rectangle((cx - 5, cy - int(h * 0.16), cx + 5, cy), fill=(110, 190, 255))
+            draw.ellipse((cx - 7, cy - int(h * 0.23), cx + 7, cy - int(h * 0.15)), fill=(255, 215, 45))
+            draw.ellipse((cx - 4, cy - int(h * 0.21), cx + 4, cy - int(h * 0.16)), fill=(255, 120, 20))
+    elif "boat" in k or "harbour" in k or "sail" in k:
+        draw.rectangle((0, 0, w, int(h * 0.60)), fill=(135, 195, 245))
+        draw.rectangle((0, int(h * 0.60), w, h), fill=(20, 85, 155))
+        bx = w // 2 + dx * 2
+        by = int(h * 0.66) + dy
+        draw.polygon([(bx - int(w * 0.24), by), (bx + int(w * 0.24), by),
+                      (bx + int(w * 0.17), by + int(h * 0.10)), (bx - int(w * 0.17), by + int(h * 0.10))],
+                     fill=(125, 65, 35))
+        draw.line([(bx, by), (bx, int(h * 0.16) + dy)], fill=(90, 60, 35), width=5)
+        draw.polygon([(bx + 4, int(h * 0.18) + dy), (bx + int(w * 0.20), by - 8), (bx + 4, by - 8)], fill=(250, 250, 252))
+        draw.polygon([(bx - 4, int(h * 0.22) + dy), (bx - int(w * 0.16), by - 8), (bx - 4, by - 8)], fill=(242, 245, 250))
+    elif "mountain" in k or "snow" in k:
+        draw.rectangle((0, 0, w, int(h * 0.72)), fill=(75, 135, 210))
+        draw.rectangle((0, int(h * 0.72), w, h), fill=(235, 242, 250))
+        peaks = [
+            ((int(w * 0.05), int(h * 0.75)), (int(w * 0.35) + dx, int(h * 0.18) + dy), (int(w * 0.65), int(h * 0.75))),
+            ((int(w * 0.35), int(h * 0.75)), (int(w * 0.68) + dx, int(h * 0.12) + dy), (int(w * 0.96), int(h * 0.75))),
+        ]
+        for p0, top, p1 in peaks:
+            draw.polygon([p0, top, p1], fill=(85, 95, 115))
+            s0 = (int(top[0] * 0.68 + p0[0] * 0.32), int(top[1] * 0.68 + p0[1] * 0.32))
+            s1 = (int(top[0] * 0.68 + p1[0] * 0.32), int(top[1] * 0.68 + p1[1] * 0.32))
+            draw.polygon([s0, top, s1], fill=(250, 252, 255))
+    else:
+        return picture(seed + sum(ord(c) for c in k), size)
+    return img
+
+
+class StandInClip:
+    """A deterministic stand-in for the CLIP image-text models (`mary/photos/clip.py`), for offline tests.
+    It embeds taught pictures and text queries into the same 512-dimensional unit sphere by their words, and untaught
+    pictures by their difference hash so near-copies stay close in visual space."""
+
+    tag = "stand-in-clip-1"
+    dim = 512
+
+    _SYNONYMS = {
+        "cars": "car", "automobile": "car", "vehicle": "car", "sedan": "car",
+        "beaches": "beach", "seashore": "beach", "coast": "beach", "ocean": "sea",
+        "sunsets": "sunset", "dusk": "sunset", "sundown": "sunset",
+        "cakes": "cake", "pastry": "cake",
+        "candles": "candle", "lit": "candle", "flame": "candle", "blowing": "candle",
+        "boats": "boat", "sailboat": "boat", "ship": "boat", "vessel": "boat", "yacht": "boat",
+        "harbor": "harbour", "port": "harbour", "marina": "harbour",
+        "mountains": "mountain", "peak": "mountain", "peaks": "mountain", "alps": "mountain",
+        "snowy": "snow", "winter": "snow",
+    }
+    _STOP = {"a", "an", "the", "at", "in", "on", "of", "with", "by", "and", "or", "to", "for", "photo", "picture", "image"}
+
+    def __init__(self, tag: str = "stand-in-clip-1"):
+        self.tag = tag
+        self.table: list[tuple[int, np.ndarray]] = []
+        self.embedded_images = 0
+        self.embedded_texts = 0
+        self._words: dict[str, np.ndarray] = {}
+
+    def _word_vec(self, word: str) -> np.ndarray:
+        w = self._SYNONYMS.get(word, word)
+        if w not in self._words:
+            seed = sum((i + 1) * ord(ch) for i, ch in enumerate(w)) + 1009 * len(w)
+            rng = np.random.default_rng(seed)
+            v = rng.normal(size=self.dim).astype(np.float32)
+            self._words[w] = v / np.linalg.norm(v)
+        return self._words[w]
+
+    def _tokens(self, text: str) -> list[str]:
+        import re
+
+        words = [w for w in re.findall(r"[a-z0-9]+", (text or "").lower()) if w not in self._STOP]
+        return words or ["empty"]
+
+    def _hash_vec(self, h: int) -> np.ndarray:
+        """Map a 64-bit dhash to a 512-d unit vector where each bit controls an 8-d block, so two dhashes within a few
+        bits have a cosine near 1.0."""
+        v = np.empty(self.dim, dtype=np.float32)
+        for bit in range(64):
+            sign = 1.0 if ((h >> bit) & 1) else -1.0
+            v[bit * 8:(bit + 1) * 8] = sign
+        return v / np.linalg.norm(v)
+
+    def teach(self, img: Image.Image, description: str, variant: int = 0) -> np.ndarray:
+        """Associate `img` (by its difference hash) with `description` in the shared image-text space."""
+        from mary.photos.read import dhash
+
+        base = self.embed_text(description)
+        self.embedded_texts -= 1
+        if variant:
+            rng = np.random.default_rng(variant + 7919)
+            noise = rng.normal(size=self.dim).astype(np.float32)
+            noise /= np.linalg.norm(noise)
+            base = 0.94 * base + 0.06 * noise
+            base = (base / np.linalg.norm(base)).astype(np.float32)
+        self.table.append((dhash(img), base))
+        return base
+
+    def available(self) -> bool:
+        return True
+
+    def embed_image(self, source: Image.Image | Path | str) -> np.ndarray:
+        from mary.photos.read import dhash, hamming
+
+        self.embedded_images += 1
+        if isinstance(source, Image.Image):
+            image = source
+        else:
+            with Image.open(source) as im:
+                image = im.convert("RGB")
+        h = dhash(image)
+        near = [(hamming(h, k), vec) for k, vec in self.table if hamming(h, k) <= 8]
+        if near:
+            return min(near, key=lambda t: t[0])[1]
+        return self._hash_vec(h)
+
+    def embed_text(self, text: str) -> np.ndarray:
+        self.embedded_texts += 1
+        tokens = self._tokens(text)
+        acc = np.zeros(self.dim, dtype=np.float32)
+        for tok in tokens:
+            acc += self._word_vec(tok)
+        norm = float(np.linalg.norm(acc))
+        return (acc / norm).astype(np.float32) if norm > 0 else np.zeros(self.dim, dtype=np.float32)
+
+
+COAST = (5.5500, -0.2000)
+
+
+@dataclass
+class MomentTruth:
+    key: str
+    rels: list[str]
+    best_rel: str
+    when: str
+    place: str
+    theme: str
+    people: list[str]
+    summary: str
+
+
+def moments_set(root: Path, standin: StandIn | None = None) -> tuple[list[MomentTruth], Cast, StandIn, dict[str, str]]:
+    """Write a library with known events (moments) and known people, returning `(truths, cast, standin, lone_rel)`:
+    1. 'June 1998 · the coast · a wedding · Grandma, Kofi' (4 photos in 'a wedding', month-dated to June 1998 at 'the coast',
+       with Grandma and Kofi; `wedding_02.jpg` is sharp, high-res and has both faces so it ranks first).
+    2. '1–2 May 2021 · Northfield · Kofi' (3 camera photos across a weekend trip to Northfield).
+    3. '25 December 2023 · Harbourton · Grandma, Ama' (3 camera photos on Christmas morning at Harbourton).
+    4. 'the 1990s' (2 old scans in a decade folder 'Scans 1990s').
+    Plus one isolated single photo ('Camera/IMG_9000.jpg' on 10 October 2022) that is not part of any multi-photo moment."""
+    from PIL import ImageFilter
+
+    root = Path(root)
+    cast = Cast(10)
+    for who in ("Grandma", "Kofi", "Ama"):
+        cast.person(who)
+    eng = standin or StandIn()
+
+    # 1. June 1998 wedding on the coast: 4 photos
+    # Make wedding_01 blurred and small; wedding_02 crisp, large (1200x900) with both Grandma & Kofi; wedding_03 & 04 normal
+    w1 = picture(801, (480, 360)).filter(ImageFilter.GaussianBlur(radius=4))
+    w2 = grained(picture(802, (1200, 900)), seed=2)
+    w3 = picture(803, (640, 480))
+    w4 = picture(804, (640, 480))
+    eng.teach(w2, [((0.20, 0.18, 0.24, 0.30), cast.face("Grandma", noise=0.2), 0.99),
+                   ((0.56, 0.18, 0.24, 0.30), cast.face("Kofi", noise=0.2), 0.99)])
+    eng.teach(w3, [((0.30, 0.20, 0.22, 0.28), cast.face("Grandma", noise=0.25), 0.96)])
+    eng.teach(w4, [((0.35, 0.22, 0.20, 0.26), cast.face("Kofi", noise=0.25), 0.95)])
+    save(root / "June 1998" / "a wedding" / "wedding_01.jpg", w1, gps=COAST, mtime=D(2020, 1, 1))
+    save(root / "June 1998" / "a wedding" / "wedding_02.jpg", w2, gps=COAST, mtime=D(2020, 1, 1))
+    save(root / "June 1998" / "a wedding" / "wedding_03.jpg", w3, gps=COAST, mtime=D(2020, 1, 1))
+    save(root / "June 1998" / "a wedding" / "wedding_04.jpg", w4, gps=COAST, mtime=D(2020, 1, 1))
+
+    # 2. Weekend trip to Northfield (1-2 May 2021): 3 photos
+    north = SITES["northfield"]
+    n1 = grained(picture(811, (960, 720)), seed=11)
+    n2 = picture(812, (640, 480))
+    n3 = picture(813, (640, 480))
+    eng.teach(n1, [((0.28, 0.18, 0.24, 0.30), cast.face("Kofi", noise=0.2), 0.99)])
+    eng.teach(n2, [((0.32, 0.20, 0.22, 0.28), cast.face("Kofi", noise=0.25), 0.95)])
+    save(root / "Camera" / "IMG_2101.jpg", n1, D(2021, 5, 1, 11, 0), north)
+    save(root / "Camera" / "IMG_2102.jpg", n2, D(2021, 5, 1, 17, 30), north)
+    save(root / "Camera" / "IMG_2103.jpg", n3, D(2021, 5, 2, 10, 15), north)
+
+    # 3. Christmas 2023 at Harbourton: 3 photos (Grandma in all 3, Ama in 2 -> Grandma, Ama)
+    harbour = SITES["harbourton"]
+    c1 = picture(821, (640, 480))
+    c2 = grained(picture(822, (1080, 810)), seed=22)
+    c3 = picture(823, (640, 480))
+    eng.teach(c1, [((0.22, 0.18, 0.22, 0.28), cast.face("Grandma", noise=0.25), 0.95),
+                   ((0.55, 0.20, 0.22, 0.28), cast.face("Ama", noise=0.25), 0.95)])
+    eng.teach(c2, [((0.22, 0.18, 0.24, 0.30), cast.face("Grandma", noise=0.2), 0.99),
+                   ((0.55, 0.20, 0.24, 0.30), cast.face("Ama", noise=0.2), 0.99)])
+    eng.teach(c3, [((0.30, 0.20, 0.22, 0.28), cast.face("Grandma", noise=0.25), 0.96)])
+    save(root / "Camera" / "IMG_2301.jpg", c1, D(2023, 12, 25, 9, 10), harbour)
+    save(root / "Camera" / "IMG_2302.jpg", c2, D(2023, 12, 25, 10, 0), harbour)
+    save(root / "Camera" / "IMG_2303.jpg", c3, D(2023, 12, 25, 11, 20), harbour)
+
+    # 4. Scans 1990s: 2 photos
+    save(root / "Scans 1990s" / "scan_01.jpg", as_scan(picture(831, (640, 480))), mtime=D(2021, 6, 1))
+    save(root / "Scans 1990s" / "scan_02.jpg", as_scan(grained(picture(832, (960, 720)), seed=32)), mtime=D(2021, 6, 1))
+
+    # 5. Isolated single photo in Camera
+    save(root / "Camera" / "IMG_9000.jpg", picture(899, (640, 480)), D(2022, 10, 10, 14, 0))
+
+    truths = [
+        MomentTruth(
+            key="wedding",
+            rels=[f"June 1998/a wedding/wedding_0{i}.jpg" for i in (1, 2, 3, 4)],
+            best_rel="June 1998/a wedding/wedding_02.jpg",
+            when="June 1998",
+            place="the coast",
+            theme="a wedding",
+            people=["Grandma", "Kofi"],
+            summary="June 1998 · the coast · a wedding · Grandma, Kofi",
+        ),
+        MomentTruth(
+            key="weekend",
+            rels=[f"Camera/IMG_210{i}.jpg" for i in (1, 2, 3)],
+            best_rel="Camera/IMG_2101.jpg",
+            when="1–2 May 2021",
+            place="Northfield",
+            theme="",
+            people=["Kofi"],
+            summary="1–2 May 2021 · Northfield · Kofi",
+        ),
+        MomentTruth(
+            key="christmas",
+            rels=[f"Camera/IMG_230{i}.jpg" for i in (1, 2, 3)],
+            best_rel="Camera/IMG_2302.jpg",
+            when="25 December 2023",
+            place="Harbourton",
+            theme="",
+            people=["Grandma", "Ama"],
+            summary="25 December 2023 · Harbourton · Grandma, Ama",
+        ),
+        MomentTruth(
+            key="scans",
+            rels=["Scans 1990s/scan_01.jpg", "Scans 1990s/scan_02.jpg"],
+            best_rel="Scans 1990s/scan_02.jpg",
+            when="the 1990s",
+            place="",
+            theme="",
+            people=[],
+            summary="the 1990s",
+        ),
+    ]
+    return truths, cast, eng, {"lone": "Camera/IMG_9000.jpg"}
+
+
+def populate_moments_library(lib, root: Path):
+    """Populate `lib` with `moments_set(root)` (including places, named people Grandma/Kofi/Ama, CLIP vectors, and
+    sample captions/vision descriptions) for conversational recall tests and `python -m mary.replay`."""
+    from mary.photos import ingest
+    from mary.photos.places import Gazetteer
+
+    places = [
+        ("Harbourton", "Coastal Region", "Ghanaland", 5.1053, -1.2466, 90000),
+        ("Northfield", "Greater North", "Britannia", 51.5072, -0.1276, 8_000_000),
+        ("the coast", "Coastal Region", "Ghanaland", COAST[0], COAST[1], 50000),
+    ]
+    lib.use_gazetteer(Gazetteer(places))
+    truths, cast, face_eng, extra = moments_set(root)
+    clip_eng = StandInClip()
+    lib._clip = clip_eng
+    lib.settings["read_text"] = False
+
+    ing = ingest.Ingest(lib, engine=face_eng, clip_engine=clip_eng)
+    lib.add_folder(root)
+    ing.scan()
+    ing.drain()
+
+    for g in lib.people.groups(limit=20, min_faces=1)["items"]:
+        fid = g["samples"][0]["id"]
+        vec = lib.store.vectors.get("face", fid, "photo_faces")
+        best_who = max(("Grandma", "Kofi", "Ama"), key=lambda w: float(vec @ cast.people[w][0]))
+        lib.people.name(g["id"], best_who)
+    ing.drain()
+    lib.maintain_moments()
+
+    # Add a vision description to the best wedding photo and best Christmas photo
+    by_when = {m["when"]: lib.moment(m["id"]) for m in lib.moments()["items"]}
+    if "June 1998" in by_when:
+        w_best = by_when["June 1998"]["cover_id"]
+        lib.set_seen(w_best, "[1] and [2] smiling beside a three-tier wedding cake by the sea", ["wedding", "wedding cake", "coast"], "bonsai-2:2b")
+    if "25 December 2023" in by_when:
+        c_best = by_when["25 December 2023"]["cover_id"]
+        lib.set_seen(c_best, "[1] and [2] opening Christmas presents by the tree", ["christmas", "presents", "tree"], "bonsai-2:2b")
+    lib.maintain_moments()
+    ing.stop()
+    return truths, cast, face_eng, extra
+
+

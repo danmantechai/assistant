@@ -38,6 +38,7 @@ SKILLS = {
     "waiting": ("Waiting for slow apps", "Apps and windows"),
     "look": ("Look at the screen", "Apps and windows"),
     "documents": ("Read documents", "Everyday"),
+    "photos": ("Photos", "Everyday"),
 }
 _ACCENTS = {"a": "American", "b": "British"}
 _GENDERS = {"f": "female", "m": "male"}

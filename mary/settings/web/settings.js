@@ -414,23 +414,43 @@ function writingBox(value, onChange, label, placeholder, cls = "") {
   return el("div", { class: "stack", style: "gap:0;padding-bottom:16px" }, area, el("div", { class: "meter-line" }, note, el("span")));
 }
 
-// A small "i" that says its text on hover or focus: explanations stay out of the way of the page.
+// A small "i" badge for standalone inline hints.
 function info(text) {
   return text ? el("span", { class: "tip", tabindex: "0", role: "img", title: text, "aria-label": text, text: "i" }) : null;
 }
 
+const PERSONA_PAGES = new Set(["identity", "personality", "stories", "voice", "wake"]);
+
+function scopeEyebrow(page) {
+  const isPersona = PERSONA_PAGES.has(page);
+  return el("div", { class: "scope-eyebrow" + (isPersona ? "" : " system") },
+    isPersona ? avatar(herNow("name"), "tiny") : null,
+    el("span", { text: isPersona ? `Persona · ${assistant()}` : "This PC · Shared & System" }));
+}
+
 function card(title, sub, ...body) {
-  return el("section", { class: "card" }, title && el("div", { class: "card-head" }, el("div", {}, el("h2", {}, title, info(sub)))), ...body);
+  return el("section", { class: "card" },
+    title && el("div", { class: "card-head" }, el("div", {}, el("h2", { text: title }), sub && el("p", { class: "card-sub", text: sub }))),
+    ...body);
 }
 
 function row(label, help, control, opts = {}) {
   return el("div", { class: "row" + (opts.wide ? " wide" : "") },
-    el("div", {}, el("div", { class: "label" }, label, info(help), opts.changed && el("span", { class: "changed-dot", title: "Not saved yet" })), opts.reset),
+    el("div", {},
+      el("div", { class: "label" }, label, opts.changed && el("span", { class: "changed-dot", title: "Not saved yet" })),
+      help && el("div", { class: "help", text: help }),
+      opts.reset),
     el("div", { class: "control" }, control));
 }
 
 function head(title, lead, ...right) {
-  return el("div", { class: "head" }, el("div", { class: "grow" }, el("h1", {}, title, info(lead))), ...right);
+  const [page] = currentPage();
+  return el("div", { class: "head" },
+    el("div", { class: "grow" },
+      scopeEyebrow(page),
+      el("h1", { text: title }),
+      lead && el("p", { class: "lead", text: lead })),
+    ...right);
 }
 
 // A setting from the schema: label, help, the right control, a dot while unsaved, and Reset when it's not the default.
@@ -475,7 +495,7 @@ function fieldsCard(page, title, sub, only) {
   const basic = fields.filter((f) => !f.advanced);
   const more = fields.filter((f) => f.advanced);
   return el("section", { class: "card" },
-    title && el("div", { class: "card-head" }, el("div", {}, el("h2", {}, title, info(sub)))),
+    title && el("div", { class: "card-head" }, el("div", {}, el("h2", { text: title }), sub && el("p", { class: "card-sub", text: sub }))),
     basic.map(settingRow),
     more.length > 0 && el("details", { class: "more" }, el("summary", {}, "Advanced", icon("chevron")), more.map(settingRow)));
 }
@@ -524,10 +544,46 @@ const NAV = [
   ["General", [["voice", "Voice"], ["wake", "Wake word"], ["listening", "Listening"], ["model", "Model"], ["skills", "Skills"], ["connections", "Connections"]]],
 ];
 
+const PAGE_TITLES = Object.fromEntries(NAV.flatMap(([, pages]) => pages.map(([id, label]) => [id, label])));
+
 function renderSide(page) {
-  document.getElementById("nav").replaceChildren(...NAV.flatMap(([group, pages]) => [el("div", { class: "group", text: group }),
-    ...pages.map(([id, label, soon]) => el("a", { href: `#${id}`, "aria-current": id === page ? "page" : null },
-      icon(id), el("span", { class: "grow", text: label }), soon && el("span", { class: "pill", text: soon })))]));
+  const personaName = herNow("name") || "Persona";
+  const query = (S.navQuery || "").trim().toLowerCase();
+  const navBox = document.getElementById("nav");
+  navBox.replaceChildren(...NAV.flatMap(([group, pages]) => {
+    const shown = query ? pages.filter(([id, label]) => label.toLowerCase().includes(query) || id.includes(query)) : pages;
+    if (!shown.length) return [];
+    return [
+      el("div", { class: "group", text: group }),
+      ...shown.map(([id, label, soon]) => el("a", { href: `#${id}`, "aria-current": id === page ? "page" : null },
+        el("span", { class: "nav-icon" }, icon(id)),
+        el("span", { class: "grow", text: label }),
+        soon ? el("span", { class: "pill", text: soon })
+          : PERSONA_PAGES.has(id) ? el("span", { class: "scope-tag", title: `Part of ${personaName}'s persona`, text: personaName }) : null)),
+    ];
+  }));
+
+  const searchHolder = document.getElementById("side-search");
+  if (searchHolder && !searchHolder.children.length) {
+    const searchInput = el("input", { type: "search", placeholder: "Search", "aria-label": "Filter settings pages", value: S.navQuery || "" });
+    searchInput.addEventListener("input", () => {
+      S.navQuery = searchInput.value;
+      renderSide(currentPage()[0]);
+    });
+    searchInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        const first = navBox.querySelector("a");
+        if (first) { first.click(); searchInput.blur(); }
+      } else if (e.key === "Escape") {
+        searchInput.value = "";
+        S.navQuery = "";
+        renderSide(currentPage()[0]);
+        searchInput.blur();
+      }
+    });
+    searchHolder.replaceChildren(icon("search"), searchInput, el("kbd", { text: "⌘K" }));
+  }
+
   const active = S.state.personas.find((p) => p.active);
   const her = S.her;
   const action = (name, text, run, opts = {}) => el("button", { type: "button", role: "menuitem", class: opts.danger ? "danger" : null,
@@ -535,7 +591,7 @@ function renderSide(page) {
   const button = el("button", { class: "switch-btn", type: "button", "aria-haspopup": "menu", "aria-expanded": "false", "aria-label": `Persona: ${assistant()}. Change` },
     avatar(herNow("name")),
     el("span", { class: "who" }, el("b", { text: herNow("name") || "Untitled" }),
-      el("span", { class: S.her.active ? "on" : "", text: S.her.active ? "Active" : `Active: ${active ? active.name : "none"}` })),
+      el("span", { class: S.her.active ? "on" : "", text: S.her.active ? "Active Persona · Apple Intelligence & Voice" : `Editing · Active: ${active ? active.name : "none"}` })),
     icon("selector"));
   const close = () => { menu.hidden = true; button.setAttribute("aria-expanded", "false"); document.removeEventListener("click", outside, true); };
   const outside = (e) => { if (!menu.contains(e.target) && !button.contains(e.target)) close(); };
@@ -544,14 +600,14 @@ function renderSide(page) {
       avatar(p.name, "small"), el("span", { class: "grow", text: p.name }),
       p.active ? el("span", { class: "pill good", text: "Active" }) : !p.private ? el("span", { class: "pill", text: "Built-in" }) : null)),
     el("hr"),
-    action("plus", "New persona", () => openNewPersona()),
-    action("upload", "Import a character card", () => importCard()),
+    action("plus", "New persona…", () => openNewPersona()),
+    action("upload", "Import character card…", () => importCard()),
     el("hr"),
     el("div", { class: "menu-label", text: herNow("name") || "This persona" }),
-    action("code", "Show the prompt", showPrompt),
-    action("download", "Export as a character card", exportCard),
-    action("copy", "Duplicate", () => openNewPersona("copy")),
-    her.private && action("trash", "Remove", removePersona, { danger: true, disabled: her.active, title: her.active ? "Make another persona active first" : null }));
+    action("code", "Show prompt…", showPrompt),
+    action("download", "Export character card…", exportCard),
+    action("copy", "Duplicate…", () => openNewPersona("copy")),
+    her.private && action("trash", "Remove…", removePersona, { danger: true, disabled: her.active, title: her.active ? "Make another persona active first" : null }));
   button.addEventListener("click", () => {
     const open = menu.hidden;
     menu.hidden = !open;
@@ -563,7 +619,7 @@ function renderSide(page) {
 
   const st = S.state;
   document.getElementById("status").replaceChildren(el("span", { class: "dot" + (st.running ? " on" : "") }),
-    el("span", { text: st.running ? (st.ready ? "MARY is running" : "MARY is starting…") : "MARY isn't running" }));
+    el("span", { text: st.running ? (st.ready ? "MARY is running" : "MARY is starting…") : "MARY is offline" }));
 }
 
 async function switchPersona(key) {
@@ -606,23 +662,38 @@ function greetingPreview() {
 function pageIdentity() {
   const her = S.her;
   const title = el("h1", { text: herNow("name") || "Untitled" });
-  const sub = her.private ? "Your persona" : "Built-in persona. Your changes are saved as your own copy.";
+  const sub = her.private ? "Custom Persona · Stored on this PC" : "Built-in Persona · Edits save to your own copy";
   const preview = el("div", { class: "help" }, el("span", { text: "Preview: " }), el("i", { text: greetingPreview() }));
   const greet = textInput(herNow("greeting"), (v) => { setHer("greeting", v); preview.lastChild.textContent = greetingPreview(); }, "Greeting");
-  const rename = (v) => { setHer("name", v); title.textContent = v.trim() || "Untitled"; renderSide(currentPage()[0]); };
+  const rename = (v) => { setHer("name", v); title.textContent = v.trim() || "Untitled"; renderSide(currentPage()[0]); renderTopbar(currentPage()[0]); };
   return el("div", {},
-    el("div", { class: "head" }, avatar(herNow("name"), "large"), el("div", { class: "grow", title: sub }, title),
-      her.active && el("span", { class: "pill good" }, icon("check"), "Active")),
+    el("div", { class: "head identity-head" },
+      avatar(herNow("name"), "large"),
+      el("div", { class: "grow" },
+        title,
+        el("p", { class: "lead", text: sub }),
+        el("div", { class: "hero-actions" },
+          her.active
+            ? el("span", { class: "pill good" }, icon("check"), "Active Persona")
+            : el("button", { class: "btn small primary", type: "button", text: "Make Active", onclick: () => usePersona(her.key) }),
+          el("button", { class: "btn small", type: "button", onclick: showPrompt }, icon("code"), "Prompt"),
+          el("button", { class: "btn small", type: "button", onclick: exportCard }, icon("download"), "Export"),
+          el("button", { class: "btn small", type: "button", onclick: () => openNewPersona("copy") }, icon("copy"), "Duplicate"),
+          el("button", { class: "btn small", type: "button", onclick: () => openNewPersona() }, icon("plus"), "New Persona")))),
     editingBanner(),
-    card(null, null,
-      row("Name", "What the assistant is called.", textInput(herNow("name"), rename, "Name")),
-      row("Nicknames", `What you call ${assistant()}. Never used as your name.`, chips(herNow("nicknames"), (v) => setHer("nicknames", v), "Add a nickname", "Nicknames"), { wide: true }),
-      row("Greeting", `Said when ${assistant()} starts. {part} becomes Good morning, afternoon or evening; {name} is your name.`,
-        el("div", { class: "stack", style: "width:100%;gap:6px" }, greet, preview), { wide: true })),
-    card("Wake responses", "One of these is said when the wake word is heard. For a sound the voice can't spell, write the text, then the sounds between slashes: Mm-hmm? /mˈhm?/",
-      row("Any time", null, chips(herNow("replies"), (v) => setHer("replies", v), "Add a response", "Responses"), { wide: true }),
-      row("Before noon, also", null, chips(herNow("morning_replies"), (v) => setHer("morning_replies", v), "Add a morning response", "Morning responses"), { wide: true })),
-    messagesCard());
+    el("div", { class: "page-grid" },
+      el("div", { class: "page-col" },
+        card("Identity & Greeting", "How this persona introduces itself and what names it responds to.",
+          row("Name", "What the assistant is called.", textInput(herNow("name"), rename, "Name")),
+          row("Nicknames", `What you call ${assistant()}. Never used as your name.`, chips(herNow("nicknames"), (v) => setHer("nicknames", v), "Add a nickname", "Nicknames"), { wide: true }),
+          row("Greeting", `Said when ${assistant()} starts. {part} becomes Good morning, afternoon or evening; {name} is your name.`,
+            el("div", { class: "stack", style: "width:100%;gap:6px" }, greet, preview), { wide: true })),
+        modelledOnCard()),
+      el("div", { class: "page-col" },
+        card("Wake responses", "One of these is said when the wake word is heard. For a sound the voice can't spell, write the text, then the sounds between slashes: Mm-hmm? /mˈhm?/",
+          row("Any time", null, chips(herNow("replies"), (v) => setHer("replies", v), "Add a response", "Responses"), { wide: true }),
+          row("Before noon, also", null, chips(herNow("morning_replies"), (v) => setHer("morning_replies", v), "Add a morning response", "Morning responses"), { wide: true })),
+        messagesCard())));
 }
 
 function pagePersonality() {
@@ -637,12 +708,13 @@ function pagePersonality() {
   return el("div", {},
     head("Personality", `Who ${assistant()} is, and how ${assistant()} talks.`),
     editingBanner(),
-    card(`Who ${assistant()} is`, "Written to the assistant: “You are…”. Warmth, humour, what they care about, and how they write (short messages, emojis, favourite words). Say what they do rather than what they don't; a model copies the words it reads.",
-      el("div", { class: "presets" }, el("span", { class: "muted", style: "align-self:center;font-size:13.5px", text: "Start from" }),
-        S.state.settings.presets.map((p) => el("button", { type: "button", text: p.label, onclick: () => apply(p) }))),
-      soulBox),
-    card("Speaking style", "How the assistant talks out loud, with a few example exchanges. Real phrases work best. Keep facts like times or the weather out of the examples, or they get repeated as if true.",
-      writingBox(herNow("speech"), (v) => setHer("speech", v), "Speaking style", "How you talk:\n- …\n\nUser: Good morning.\nYou: …")));
+    el("div", { class: "page-grid" },
+      card(`Who ${assistant()} is`, "Written to the assistant: “You are…”. Warmth, humour, what they care about, and how they write (short messages, emojis, favourite words). Say what they do rather than what they don't; a model copies the words it reads.",
+        el("div", { class: "presets" }, el("span", { class: "muted", style: "align-self:center;font-size:13.5px", text: "Start from" }),
+          S.state.settings.presets.map((p) => el("button", { type: "button", text: p.label, onclick: () => apply(p) }))),
+        soulBox),
+      card("Speaking style", "How the assistant talks out loud, with a few example exchanges. Real phrases work best. Keep facts like times or the weather out of the examples, or they get repeated as if true.",
+        writingBox(herNow("speech"), (v) => setHer("speech", v), "Speaking style", "How you talk:\n- …\n\nUser: Good morning.\nYou: …"))));
 }
 
 // Real messages from the person the persona is: how they write comes from these and the personality, not a
@@ -702,7 +774,7 @@ async function removeTexts(t) {
 // ------------------------------------------------------------------ Memory: Stories (the persona's own)
 
 function pageStories() {
-  const box = el("div", { class: "list" });
+  const box = el("div", {});
   const draw = (editing = null) => {
     const items = S.her.lore.map((l) => editing === l.file ? storyForm(l, draw) : el("div", { class: "story" },
       el("div", { class: "top" }, el("b", { text: l.title }),
@@ -710,15 +782,23 @@ function pageStories() {
           el("button", { class: "icon-btn danger", type: "button", "aria-label": `Remove ${l.title}`, onclick: () => removeStory(l) }, icon("trash")))),
       el("p", { text: l.text }),
       el("div", { class: "kw" }, l.keywords.map((k) => el("span", { class: "pill", text: k })))));
-    if (!items.length && editing !== "new") items.push(el("div", { class: "empty", text: "No stories yet." }));
-    box.replaceChildren(...items, editing === "new" ? storyForm(null, draw)
-      : el("div", { class: "add-line" }, el("button", { class: "btn", type: "button", onclick: () => draw("new") }, icon("plus"), "Add a story")));
+    if (editing === "new") items.unshift(storyForm(null, draw));
+    if (!items.length) {
+      box.className = "narrow-left";
+      box.replaceChildren(card(null, null,
+        el("div", { class: "empty", text: "No stories yet." }),
+        el("div", { class: "add-line" }, el("button", { class: "btn", type: "button", onclick: () => draw("new") }, icon("plus"), "Add a story"))));
+    } else {
+      box.className = "stories-grid";
+      box.replaceChildren(...items);
+    }
   };
   draw();
   return el("div", {},
-    head("Stories", `Memories, sayings and family facts ${assistant()} brings up when one of their words is said. Each persona has its own.`),
+    head("Stories", `Memories, sayings and family facts ${assistant()} brings up when one of their words is said. Each persona has its own.`,
+      el("button", { class: "btn primary", type: "button", onclick: () => draw("new") }, icon("plus"), "Add a story")),
     editingBanner(),
-    card(null, null, box));
+    box);
 }
 
 function storyForm(l, draw) {
@@ -779,8 +859,16 @@ async function exportCard() {
   const key = S.her.key;
   const withVoice = voiceNow().elevenlabs.voice_id ? await askVoiceId() : false;
   if (withVoice === null) return;
+  let withFace = false;
+  if (S.her.face && S.her.face.available) {
+    withFace = confirm("Include animated face in the exported card?");
+  }
   try {
-    const json = await api("GET", `/api/personas/${key}/card${withVoice ? "?voice=1" : ""}`);
+    const q = [];
+    if (withVoice) q.push("voice=1");
+    if (withFace) q.push("face=1");
+    const qs = q.length ? `?${q.join("&")}` : "";
+    const json = await api("GET", `/api/personas/${key}/card${qs}`);
     download(`${key}.card.json`, JSON.stringify(json, null, 2));
   } catch (e) { toast(e.message, true); }
 }
@@ -920,13 +1008,16 @@ async function kokoroSample(voice) {
 }
 
 function cardHead(title, sub, right) {
-  return el("div", { class: "card-head", style: "padding-top:0" }, el("div", {}, el("h2", {}, title, info(sub))), right);
+  return el("div", { class: "card-head", style: "padding-top:0" },
+    el("div", {}, el("h2", { text: title }), sub && el("p", { class: "card-sub", text: sub })),
+    right);
 }
 
 function pageVoice() {
   const v = voiceNow();
   const cloud = v.provider === "elevenlabs";
   const kokoroCard = el("section", { class: "card pad" });
+  let speedCard = null;
   if (cloud) {
     const backup = select([[v.voice, v.voice]], v.voice, (x) => setVoice("voice", x), "Backup voice", true);
     choices("kokoro").then((c) => backup.fill(c.items.map((x) => [x.id, `${x.name} · ${x.detail}`])));
@@ -940,8 +1031,9 @@ function pageVoice() {
     const speedValue = el("span", { class: "muted", text: `${Number(v.speed).toFixed(2)}×` });
     const speed = el("input", { type: "range", min: 0.5, max: 2, step: 0.05, value: v.speed, "aria-label": "Speaking speed" });
     speed.addEventListener("input", () => { speedValue.textContent = `${Number(speed.value).toFixed(2)}×`; setVoice("speed", Number(speed.value)); });
-    kokoroCard.append(cardHead("Voices on this PC", "Free and private. Press play to hear one.", filters), gallery,
-      el("div", { class: "row", style: "margin-top:12px" }, el("div", {}, el("div", { class: "label", text: "Speaking speed" })), el("div", { class: "control" }, speed, speedValue)));
+    kokoroCard.append(cardHead("Voices on this PC", "Free and private. Press play to hear one.", filters), gallery);
+    speedCard = card("Speaking pace", "Adjust how quickly or slowly this persona speaks.",
+      el("div", { class: "row" }, el("div", {}, el("div", { class: "label", text: "Speaking speed" })), el("div", { class: "control" }, speed, speedValue)));
   }
 
   let cloudCard = null;
@@ -985,14 +1077,18 @@ function pageVoice() {
     return URL.createObjectURL(await api("POST", "/api/sample", { provider: "kokoro", text, voice: now.voice, speed: now.speed }));
   }));
 
+  const tryCard = card("Try a sentence", "Hear how the selected voice pronounces any line.",
+    el("div", { class: "add-line", style: "border-top:0;padding-top:4px" }, tryText, tryBtn));
+
   return el("div", {},
-    head("Voice", `How ${assistant()} sounds.`),
+    head("Voice", `How ${assistant()} sounds.`,
+      segmented([["kokoro", "On this PC"], ["elevenlabs", "ElevenLabs"]], v.provider, (p) => { setVoice("provider", p); render(); }, "Voice provider")),
     editingBanner(),
     S.state.settings.voice_override.length > 0 && el("div", { class: "banner" }, el("span", { class: "grow",
       text: `Your config file sets the voice (tts: ${S.state.settings.voice_override.join(", ")}), which overrides this persona's. Remove those lines to use the voice chosen here.` })),
-    el("div", { style: "margin-bottom:18px" }, segmented([["kokoro", "On this PC"], ["elevenlabs", "ElevenLabs"]], v.provider, (p) => { setVoice("provider", p); render(); }, "Voice provider")),
-    cloudCard, kokoroCard,
-    card("Try a sentence", null, el("div", { class: "add-line", style: "border-top:0;padding-top:4px" }, tryText, tryBtn)));
+    el("div", { class: "page-grid asym" },
+      el("div", { class: "page-col" }, cloud ? cloudCard : kokoroCard),
+      el("div", { class: "page-col" }, tryCard, cloud ? kokoroCard : speedCard)));
 }
 
 // ------------------------------------------------------------------ Wake word
@@ -1042,14 +1138,17 @@ function pageWake() {
     !settingNow("wakeword.enabled") && el("div", { class: "banner" },
       el("span", { class: "grow", text: "The wake word is off, so only the hotkey starts a conversation." }),
       el("a", { class: "btn small", href: "#listening", text: "Turn it on in Listening" })),
-    card("Wake phrases", `${assistant()} answers to these. A phrase of your own is trained on your voice, right here in the browser.`,
-      el("div", { class: "list" }, rows.length ? rows : [el("div", { class: "empty", text: "No wake phrase yet. Add one below." })]),
-      el("div", { class: "add-line" }, phrase, el("button", { class: "btn", type: "button", onclick: addOwn }, icon("plus"), "Add")),
-      builtins.length > 0 && el("div", { style: "padding:0 0 18px" }, el("h3", { text: "Ready-made, no training needed" }),
-        el("div", { class: "presets", style: "margin:0" }, builtins.map(([m, p]) => el("button", { type: "button", text: p, onclick: () => {
-          setWake([...clone(wakeNow()), { phrase: p, model: m, names: [p.replace(GREETING, "").toLowerCase()], alone: [], misheard: [], bare: false }]);
-          render();
-        } }))))));
+    el("div", { class: "page-grid asym" },
+      card("Wake phrases", `${assistant()} answers to these. A phrase of your own is trained on your voice, right here in the browser.`,
+        el("div", { class: "list" }, rows.length ? rows : [el("div", { class: "empty", text: "No wake phrase yet. Add one below." })]),
+        el("div", { class: "add-line" }, phrase, el("button", { class: "btn", type: "button", onclick: addOwn }, icon("plus"), "Add"))),
+      card("Ready-made, no training needed", "Built-in wake words that work right away on this PC without recording takes.",
+        builtins.length > 0
+          ? el("div", { class: "presets", style: "margin:4px 0 14px" }, builtins.map(([m, p]) => el("button", { type: "button", text: p, onclick: () => {
+              setWake([...clone(wakeNow()), { phrase: p, model: m, names: [p.replace(GREETING, "").toLowerCase()], alone: [], misheard: [], bare: false }]);
+              render();
+            } })))
+          : el("div", { class: "empty", text: "All ready-made wake phrases have been added." }))));
 }
 
 async function openTrainer(phrase) {
@@ -1159,7 +1258,7 @@ function pageTrainer() {
   const at = steps.findIndex((s) => s[0] === t.step);
   Mic.meters.clear();
   const view = { intro: trainIntro, takes: trainTakes, near: trainNear, extra: trainExtra, train: trainRun }[t.step]();
-  return el("div", {},
+  return el("div", { class: "narrow-left" },
     el("button", { class: "btn ghost", type: "button", style: "margin:-8px 0 10px -10px", onclick: leaveTrainer }, icon("back"), "Wake word"),
     head(`Train “${t.plan.phrase}”`, t.more ? "Record a few more takes, then train again." : "About 5 minutes of recording, then 10 to 20 minutes of training while you carry on."),
     el("div", { class: "steps" }, steps.map(([id, label], i) => el("span", { class: i === at ? "now" : i < at ? "done" : "", text: `${i + 1}. ${label}` }))),
@@ -1382,13 +1481,18 @@ function pageAbout() {
   const p = profileNow();
   const memories = (text) => text.split("\n").map((line) => line.trim()).filter(Boolean);  // one memory per line
   return el("div", {},
-    el("div", { class: "head" }, avatar(p.name || "You", "large"), el("div", { class: "grow" }, el("h1", { text: p.name || "About you" }))),
-    el("section", { class: "card" },
-      row("Your name", `What ${assistant()} calls you, now and then.`, textInput(p.name, (v) => setProfile("name", v), "Your name", "Sam"))),
-    card("About you", `Write about yourself in your own words: what you do, the people in your life, what you like. ${assistant()} always has it in mind.`,
-      writingBox(p.about || "", (v) => setProfile("about", v.trim()), "About you", "I'm a teacher in … I live with … I like …")),
-    card("Memories", `One per line. ${assistant()} adds a line when you say “remember that…”, and takes one away when you say “forget that…”.`,
-      writingBox((p.facts || []).join("\n"), (v) => setProfile("facts", memories(v)), "Memories", "One per line: My sister's name is Ada", "short")),);
+    el("div", { class: "head identity-head" }, avatar(p.name || "You", "large"),
+      el("div", { class: "grow" }, scopeEyebrow("about"), el("h1", { text: p.name || "About you" }),
+        el("p", { class: "lead", text: "Shared across every persona on this PC." }))),
+    el("div", { class: "page-grid" },
+      el("div", { class: "page-col" },
+        el("section", { class: "card" },
+          row("Your name", `What ${assistant()} calls you, now and then.`, textInput(p.name, (v) => setProfile("name", v), "Your name", "Sam"))),
+        card("About you", `Write about yourself in your own words: what you do, the people in your life, what you like. ${assistant()} always has it in mind.`,
+          writingBox(p.about || "", (v) => setProfile("about", v.trim()), "About you", "I'm a teacher in … I live with … I like …"))),
+      el("div", { class: "page-col" },
+        card("Memories", `One per line. ${assistant()} adds a line when you say “remember that…”, and takes one away when you say “forget that…”.`,
+          writingBox((p.facts || []).join("\n"), (v) => setProfile("facts", memories(v)), "Memories", "One per line: My sister's name is Ada")))));
 }
 
 // ------------------------------------------------------------------ Memory: Photos
@@ -1400,25 +1504,29 @@ const DATE_FROM = { exif: "from the camera", filename: "from the file's name", a
 const FLAG_TEXT = { undated: "No date", guess: "Date is a guess", check: "Needs a look", copies: "Copies", noplace: "No place" };
 const ROW_PX = 190;   // how tall a row of photos is aimed to be
 
-// A date as exact as you know it: a year, then a month, then a day, or a whole decade ("the 1990s").
-function dateEditor(onSave, saveLabel = "Save the date", extra = null) {
-  const year = el("input", { type: "number", min: "1900", max: String(new Date().getFullYear()), placeholder: "Year", "aria-label": "Year", style: "width:90px" });
-  const month = select([[0, "Month"], ...MONTHS.map((m, i) => [i + 1, m])], 0, () => {}, "Month");
-  const day = el("input", { type: "number", min: "1", max: "31", placeholder: "Day", "aria-label": "Day", style: "width:70px" });
-  const decade = el("input", { type: "checkbox", id: "decade", "aria-label": "A whole decade" });
-  return el("div", { class: "stack" },
+function dateEditor(onSave, saveLabel = "Save the date", extra = null, initial = null, onCancel = null) {
+  const curY = initial?.year ? String(initial.year) : "";
+  const curM = initial?.month ? Number(initial.month) : 0;
+  const curD = initial?.day ? String(initial.day) : "";
+  const year = el("input", { type: "number", min: "1900", max: String(new Date().getFullYear()), value: curY, placeholder: "Year", "aria-label": "Year", style: "width:90px" });
+  const month = select([[0, "Month"], ...MONTHS.map((m, i) => [i + 1, m])], curM, () => {}, "Month");
+  const day = el("input", { type: "number", min: "1", max: "31", value: curD, placeholder: "Day", "aria-label": "Day", style: "width:70px" });
+  const decade = el("input", { type: "checkbox", id: "decade", "aria-label": "A whole decade", checked: !!initial?.decade });
+  const cancelBtn = onCancel ? el("button", { class: "btn ghost small", type: "button", text: "Cancel", onclick: onCancel }) : null;
+  return el("div", { class: "stack", style: "margin: 8px 0; padding: 10px; background: var(--surface-2); border-radius: 8px" },
     el("div", { class: "actions" }, year, month, day),
     el("label", { class: "check" }, decade, " Sometime in that decade"),
     extra,
-    el("div", { class: "actions end" }, el("button", { class: "btn primary small", type: "button", text: saveLabel, onclick: () => {
+    el("div", { class: "actions end" }, cancelBtn, el("button", { class: "btn primary small", type: "button", text: saveLabel, onclick: () => {
       onSave({ year: year.value, month: month.selectedIndex || null, day: day.value || null, decade: decade.checked });
     } })));
 }
 
-function placeEditor(onSave) {
-  const input = el("input", { type: "text", placeholder: "Where was it?", "aria-label": "Place" });
+function placeEditor(onSave, initial = "", onCancel = null) {
+  const input = el("input", { type: "text", value: initial || "", placeholder: "Where was it?", "aria-label": "Place" });
   input.addEventListener("keydown", (e) => { if (e.key === "Enter") onSave(input.value); });
-  return el("div", { class: "actions" }, input, el("button", { class: "btn primary small", type: "button", text: "Save", onclick: () => onSave(input.value) }));
+  const cancelBtn = onCancel ? el("button", { class: "btn ghost small", type: "button", text: "Cancel", onclick: onCancel }) : null;
+  return el("div", { class: "actions", style: "margin: 8px 0" }, input, cancelBtn, el("button", { class: "btn primary small", type: "button", text: "Save", onclick: () => onSave(input.value) }));
 }
 
 // The heading a photo sits under, like Google Photos: a day when the day is known, else its month, year or decade.
@@ -1435,6 +1543,8 @@ function progressText(p) {
   if (p.reading > 0) return `Reading photos · ${(p.found - p.reading).toLocaleString()} of ${p.found.toLocaleString()}`;
   if (p.faces && p.faces.on && p.faces.ready && p.state === "faces") return "Looking for faces…";
   if (p.text && p.ocr && p.text_left > 0) return `Reading the words in photos · ${(p.photos - p.text_left).toLocaleString()} of ${p.photos.toLocaleString()}`;
+  if (p.clip && p.clip.present && p.state === "clip" && p.clip.left > 0) return `Indexing pictures · ${(p.photos - p.clip.left).toLocaleString()} of ${p.photos.toLocaleString()}`;
+  if (p.vision && p.vision.on && p.state === "vision" && p.vision.left > 0) return `Looking at photos · ${(p.photos - p.vision.left).toLocaleString()} of ${p.photos.toLocaleString()}`;
   return "";
 }
 
@@ -1497,7 +1607,7 @@ function pagePhotos() {
     if (fresh) { st.items = []; st.last = null; st.tiles = null; PH.ids = []; body.replaceChildren(); }
     const f = PH.filters;
     const qs = new URLSearchParams({ order: f.order, offset: String(st.items.length) });
-    for (const k of ["year", "month", "place", "folder", "flag", "person", "q"]) if (f[k]) qs.set(k, f[k]);
+    for (const k of ["year", "month", "place", "folder", "flag", "person", "moment", "q"]) if (f[k]) qs.set(k, f[k]);
     try {
       const r = await api("GET", `/api/photos/list?${qs}`);
       if (token !== st.token) return;
@@ -1506,7 +1616,7 @@ function pagePhotos() {
       st.total = r.total;
       addItems(r.items);
       if (!st.items.length) body.replaceChildren(el("div", { class: "gp-nothing" }, icon("search"), el("div", { text: "Nothing matches" }),
-        el("button", { class: "btn small", type: "button", text: "Clear filters", onclick: () => { Object.assign(PH.filters, { year: "", month: "", place: "", folder: "", flag: "", person: "", q: "" }); drawTop(); drawChips(); loadMore(true); } })));
+        el("button", { class: "btn small", type: "button", text: "Clear filters", onclick: () => { Object.assign(PH.filters, { year: "", month: "", place: "", folder: "", flag: "", person: "", moment: "", q: "" }); drawTop(); drawChips(); loadMore(true); } })));
     } catch (e) { if (token === st.token) body.replaceChildren(el("div", { class: "gp-nothing", text: e.message })); }
     finally { st.loading = false; }
     if (st.more && end.getBoundingClientRect().top < window.innerHeight + 400) loadMore();
@@ -1519,21 +1629,23 @@ function pagePhotos() {
     editor.replaceChildren();
     if (ids.length) {
       const show = (node) => { editor.hidden = false; editor.replaceChildren(node); };
-      top.replaceChildren(el("div", { class: "gp-select" },
+      top.replaceChildren(...[el("div", { class: "gp-select" },
         el("button", { class: "icon-btn", type: "button", "aria-label": "Clear the selection", onclick: () => { PH.picked.clear(); body.querySelectorAll(".gp-tile.picked").forEach((n) => { n.classList.remove("picked"); n.querySelector(".gp-check").setAttribute("aria-pressed", "false"); }); drawTop(); } }, icon("x")),
         el("b", { text: `${ids.length} selected` }), el("span", { class: "grow" }),
         el("button", { class: "btn small", type: "button", onclick: () => show(dateEditor((d) => act("/api/photos/fix", { ids, date: d }, "Date saved").then(() => PH.picked.clear()))) }, icon("calendar"), "Date"),
         el("button", { class: "btn small", type: "button", onclick: () => show(placeEditor((v) => act("/api/photos/fix", { ids, place: v }, "Place saved").then(() => PH.picked.clear()))) }, icon("pin"), "Place"),
         ids.length > 1 && el("button", { class: "btn small", type: "button", text: "Same photo", onclick: async () => { if (await act("/api/photos/merge", { ids }, "Kept as one photo")) PH.picked.clear(); } }),
-        el("button", { class: "btn small danger", type: "button", onclick: () => removePhotos(ids) }, icon("trash"), "Remove")));
+        el("button", { class: "btn small danger", type: "button", onclick: () => removePhotos(ids) }, icon("trash"), "Remove"))].filter(Boolean));
       return;
     }
     const f = PH.filters;
     const search = el("input", { type: "search", value: f.q, placeholder: "Search your photos", "aria-label": "Search your photos" });
     let t = 0;
     search.addEventListener("input", () => { clearTimeout(t); t = setTimeout(() => { f.q = search.value.trim(); loadMore(true); }, 300); });
-    top.replaceChildren(el("div", { class: "gp-search" }, icon("search"), search),
-      el("button", { class: "btn", type: "button", onclick: () => foldersDialog(st.s, reload) }, icon("folder"), "Folders"));
+    const mCount = st.s && st.s.progress && st.s.progress.moments ? st.s.progress.moments : 0;
+    top.replaceChildren(...[el("div", { class: "gp-search" }, icon("search"), search),
+      mCount > 0 && el("button", { class: "btn", type: "button", onclick: () => momentsDialog(reload) }, icon("calendar"), `Moments (${mCount})`),
+      el("button", { class: "btn", type: "button", onclick: () => foldersDialog(st.s, reload) }, icon("folder"), "Folders")].filter(Boolean));
   };
 
   const removePhotos = async (ids) => {
@@ -1618,6 +1730,79 @@ function pagePhotos() {
   return page;
 }
 
+// ---- moments: browse events, open one, rename, merge or split
+async function momentsDialog(done) {
+  const dialog = document.getElementById("dialog");
+  const body = el("div", { class: "stack" });
+  dialog.replaceChildren(el("form", { method: "dialog", class: "photo-dialog" }, el("h2", { id: "dialog-title", text: "Moments" }), body,
+    el("div", { class: "actions end" }, el("button", { class: "btn primary", type: "submit", text: "Done" }))));
+  dialog.addEventListener("close", () => done && done(), { once: true });
+  dialog.showModal();
+  const load = async () => {
+    try {
+      const r = await api("GET", "/api/photos/moments");
+      if (!r.items.length) { body.replaceChildren(el("div", { class: "empty", text: "No moments yet." })); return; }
+      body.replaceChildren(el("div", { class: "list" }, ...r.items.map((m) => el("div", { class: "item" },
+        m.thumb && el("img", { src: m.thumb, alt: "", style: "width:56px;height:56px;object-fit:cover;border-radius:8px" }),
+        el("div", { class: "grow" }, el("div", { style: "font-weight:560", text: m.summary }),
+          el("div", { class: "sub", text: `${m.photos} photo${m.photos === 1 ? "" : "s"}${m.guess ? " · estimated date" : ""}` })),
+        el("button", { class: "btn small", type: "button", text: "Open", onclick: () => { dialog.close(); momentDialog(m.id, done); } })))));
+    } catch (e) { body.replaceChildren(el("p", { class: "muted", text: e.message })); }
+  };
+  await load();
+}
+
+async function momentDialog(mid, done) {
+  const dialog = document.getElementById("dialog");
+  const body = el("div", { class: "stack" });
+  dialog.replaceChildren(el("form", { method: "dialog", class: "photo-dialog" }, body,
+    el("div", { class: "actions end" }, el("button", { class: "btn primary", type: "submit", text: "Done" }))));
+  dialog.addEventListener("close", () => done && done(), { once: true });
+  dialog.showModal();
+  const picked = new Set();
+  const load = async () => {
+    try {
+      const [m, all] = await Promise.all([api("GET", `/api/photos/moments/${mid}`), api("GET", "/api/photos/moments")]);
+      const titleInput = el("input", { type: "text", value: m.title || "", placeholder: "Name this moment (e.g. a wedding)", "aria-label": "Moment title" });
+      const saveTitle = async () => {
+        try { await api("POST", "/api/photos/moments/rename", { id: m.id, title: titleInput.value }); toast("Saved"); await load(); } catch (e) { toast(e.message, true); }
+      };
+      const others = (all.items || []).filter((o) => o.id !== m.id);
+      const joinSel = others.length ? select([[0, "Join with another moment…"], ...others.map((o) => [o.id, o.summary])], 0, async (oid) => {
+        if (!oid) return;
+        try { await api("POST", "/api/photos/moments/merge", { keep: m.id, other: Number(oid) }); toast("Moments joined"); await load(); } catch (e) { toast(e.message, true); }
+      }, "Join with another moment") : null;
+      const bar = el("div", { class: "actions" });
+      const drawBar = () => {
+        bar.replaceChildren(...[
+          picked.size > 0 && picked.size < m.items.length ? el("button", { class: "btn small", type: "button", text: `Split ${picked.size} into a separate moment`, onclick: async () => {
+            try { await api("POST", "/api/photos/moments/split", { id: m.id, ids: [...picked] }); toast("Split into a new moment"); picked.clear(); await load(); } catch (e) { toast(e.message, true); }
+          } }) : null,
+          joinSel].filter(Boolean));
+      };
+      const grid = el("div", { class: "photo-grid small" }, ...m.items.map((p, idx) => {
+        const card = el("div", { class: "photo" + (picked.has(p.id) ? " picked" : "") },
+          el("img", { src: p.thumb, alt: p.when, loading: "lazy", onclick: () => {
+            picked.has(p.id) ? picked.delete(p.id) : picked.add(p.id);
+            card.classList.toggle("picked", picked.has(p.id));
+            drawBar();
+          } }),
+          el("div", { class: "actions" },
+            idx === 0 && el("span", { class: "pill good", text: "Best" }),
+            el("button", { class: "btn small", type: "button", text: "View", onclick: () => { dialog.close(); photoDialog(p.id); } })));
+        return card;
+      }));
+      drawBar();
+      body.replaceChildren(...[
+        el("h2", { text: m.summary }),
+        el("div", { class: "actions" }, titleInput, el("button", { class: "btn small primary", type: "button", text: "Save name", onclick: saveTitle })),
+        bar,
+        grid].filter(Boolean));
+    } catch (e) { body.replaceChildren(el("p", { class: "muted", text: e.message })); }
+  };
+  await load();
+}
+
 // ---- the folders: add, set a date for an album, look again, remove
 async function foldersDialog(s0, done) {
   const dialog = document.getElementById("dialog");
@@ -1674,7 +1859,12 @@ async function foldersDialog(s0, done) {
         if (!confirm("Fetch the list of places?\n\nIt is about 11 MB, from download.geonames.org (free, CC BY 4.0). Only the list comes to this PC: your photos and their positions are never sent anywhere.")) return;
         const b = e.currentTarget; b.disabled = true; b.textContent = "Fetching…";
         try { const r = await api("POST", "/api/photos/places", {}); toast(`${r.places.toLocaleString()} places; ${r.photos_named} photo${r.photos_named === 1 ? "" : "s"} named`); await redraw(); }
-        catch (err) { toast(err.message, true); b.disabled = false; b.textContent = "Add place names…"; } } }))].filter(Boolean));
+        catch (err) { toast(err.message, true); b.disabled = false; b.textContent = "Add place names…"; } } })),
+      p.clip && !p.clip.present && el("div", { class: "actions" }, el("button", { class: "btn small", type: "button", text: "Add picture search…", onclick: async (e) => {
+        if (!confirm(`Get the two picture-search models?\n\nAbout ${p.clip.mb} MB from huggingface.co/Qdrant (CLIP ViT-B/32, Apache-2.0). Only the models come to this PC: your photos are never sent anywhere.`)) return;
+        const b = e.currentTarget; b.disabled = true; b.textContent = "Fetching…";
+        try { await api("POST", "/api/photos/clip", {}); toast("Picture search ready"); await redraw(); }
+        catch (err) { toast(err.message, true); b.disabled = false; b.textContent = "Add picture search…"; } } }))].filter(Boolean));
   };
   draw();
 }
@@ -1702,7 +1892,7 @@ async function photoDialog(id) {
     let p;
     try { p = await api("GET", `/api/photos/${pid}`); } catch (e) { side.replaceChildren(el("p", { class: "muted", text: e.message })); return; }
     const at = PH.ids.indexOf(pid);
-    const big = el("img", { src: p.thumb, alt: p.caption || p.when });
+    const big = el("img", { src: p.thumb, alt: p.caption || p.seen || p.when });
     const loader = new Image();
     loader.onload = () => { big.src = loader.src; };
     loader.src = p.view;
@@ -1712,9 +1902,15 @@ async function photoDialog(id) {
     const editor = el("div", {});
     const caption = el("input", { type: "text", value: p.caption || "", placeholder: "Add a description", "aria-label": "Description" });
     caption.addEventListener("change", () => fix({ caption: caption.value }, "Saved"));
+    let dateOpen = false;
+    let placeOpen = false;
     const who = p.people && p.people.faces.length ? el("div", { class: "v-people" },
-      ...p.people.faces.map((f) => el("div", { class: "who-face" }, el("img", { src: f.crop, alt: "" }), el("span", { text: f.name || "No name yet" }))),
+      ...p.people.faces.map((f) => el("div", { class: "who-face" },
+        el("img", { src: f.crop, alt: "" }),
+        el("span", { text: f.name || "No name yet" })
+      )),
       p.people.unnamed > 0 && el("a", { class: "muted small", href: "#people", onclick: () => v.close(), text: "Add names" })) : null;
+    const momentLine = p.moment ? el("button", { class: "btn small ghost", type: "button", text: p.moment.summary, onclick: () => { v.close(); momentDialog(p.moment.id, PH.refresh); } }) : null;
     const similar = el("div", {});
     api("GET", `/api/photos/${pid}/similar`).then((r) => {
       if (!r.items.length) return;
@@ -1726,10 +1922,61 @@ async function photoDialog(id) {
       el("div", { class: "v-head" }, el("h2", { text: p.when }),
         (p.guess || p.flag) && el("span", { class: "pill warn", text: p.flag ? "Check the date" : "Estimated" })),
       el("div", { class: "v-line" }, icon("pin"), el("span", { text: p.place_label || "No place" })),
+      momentLine,
       who, caption,
+      !p.caption && p.seen && el("div", { class: "muted small", text: p.seen }),
       el("div", { class: "actions" },
-        el("button", { class: "btn small", type: "button", onclick: () => editor.replaceChildren(dateEditor((d) => fix({ date: d }, "Date saved"))) }, icon("calendar"), "Date"),
-        el("button", { class: "btn small", type: "button", onclick: () => editor.replaceChildren(placeEditor((x) => fix({ place: x }, "Place saved"))) }, icon("pin"), "Place"),
+        p.people && p.people.faces.length > 0 && el("button", { class: "btn small", type: "button", onclick: () => {
+          if (p.people.faces.length === 1) {
+            setupFace(pid, p.people.faces[0]?.person);
+          } else {
+            const choices = p.people.faces.map((f, i) => `${i + 1}. ${f.name || "Unnamed person"}`).join("\n");
+            const pick = prompt("Which person in this photo should be used as the face?\n" + choices);
+            const idx = Number(pick) - 1;
+            if (idx >= 0 && idx < p.people.faces.length) {
+              setupFace(pid, p.people.faces[idx].person);
+            }
+          }
+        } }, icon("personality"), "Use as face"),
+        el("button", { class: "btn small", type: "button", onclick: () => {
+          if (dateOpen) {
+            editor.replaceChildren();
+            dateOpen = false;
+            return;
+          }
+          let init = null;
+          if (p.taken) {
+            const d = new Date(p.taken);
+            if (!isNaN(d.getTime())) {
+              init = { year: d.getFullYear(), month: d.getMonth() + 1, day: d.getDate() };
+            }
+          }
+          placeOpen = false;
+          dateOpen = true;
+          editor.replaceChildren(dateEditor((d) => {
+            dateOpen = false;
+            fix({ date: d }, "Date saved");
+          }, "Save the date", null, init, () => {
+            editor.replaceChildren();
+            dateOpen = false;
+          }));
+        } }, icon("calendar"), "Date"),
+        el("button", { class: "btn small", type: "button", onclick: () => {
+          if (placeOpen) {
+            editor.replaceChildren();
+            placeOpen = false;
+            return;
+          }
+          dateOpen = false;
+          placeOpen = true;
+          editor.replaceChildren(placeEditor((x) => {
+            placeOpen = false;
+            fix({ place: x }, "Place saved");
+          }, p.place_label || "", () => {
+            editor.replaceChildren();
+            placeOpen = false;
+          }));
+        } }, icon("pin"), "Place"),
         p.source === "person" && el("button", { class: "btn small", type: "button", text: "Undo date", onclick: () => fix({ clear: "date" }, "Back to what was read") }),
         p.place_source === "person" && el("button", { class: "btn small", type: "button", text: "Undo place", onclick: () => fix({ clear: "place" }, "Back to what was read") }),
         el("button", { class: "btn small danger", type: "button", onclick: async () => {
@@ -1739,12 +1986,264 @@ async function photoDialog(id) {
       el("details", { class: "more" }, el("summary", {}, "Details", icon("chevron")),
         el("div", { class: "stack" },
           el("div", { class: "muted small", text: `${DATE_FROM[p.source] || ""}${p.place_label ? ` · place ${p.place_source === "person" ? "set by you" : "from the GPS position"}` : ""}` }),
+          p.seen && p.caption && el("div", { class: "muted small", text: p.seen }),
+          p.tags && p.tags.length > 0 && el("div", { class: "muted small", text: p.tags.join(" · ") }),
           p.text && el("div", { class: "words", text: p.text }),
           ...p.file_list.map((f) => el("div", { class: "item" }, el("div", { class: "grow" }, el("div", { class: "sub", text: f.path }), el("div", { class: "sub", text: `${f.width}×${f.height} · ${(f.size / 1048576).toFixed(1)} MB${f.exists ? "" : " · not found where it was"}` })),
             f.exists && el("button", { class: "btn small", type: "button", text: "Show in folder", onclick: async () => { try { await api("POST", `/api/photos/${pid}/show`, {}); } catch (e) { toast(e.message, true); } } }))))),
       similar].filter(Boolean));
   }
   await show(id);
+}
+
+async function setupFace(photoId, personId) {
+  const key = S.editing || S.her?.key;
+  if (!key) return toast("No persona selected", true);
+  toast("Checking photo suitability…");
+  let chk;
+  try {
+    chk = await api("POST", `/api/personas/${key}/face/check`, { photo_id: photoId, person_id: personId });
+  } catch (e) {
+    return toast(e.message, true);
+  }
+  if (!chk.ok) {
+    alert("This photo cannot be used as a face:\n\n" + (chk.reason || "Photo does not meet suitability requirements."));
+    return;
+  }
+
+  toast("Preparing animated face…");
+  let out;
+  try {
+    out = await api("POST", `/api/personas/${key}/face/prepare`, { photo_id: photoId, person_id: personId });
+  } catch (e) {
+    return toast(e.message, true);
+  }
+
+  await showFacePreviewDialog(key, photoId, personId, out?.manifest);
+}
+
+async function showFacePreviewDialog(key, photoId, personId, manifest) {
+  const dialog = document.getElementById("dialog");
+  const stage = el("div", { class: "face-preview-stage" });
+  const t = Date.now();
+
+  if (!manifest) {
+    try {
+      manifest = await api("GET", `/avatar/${key}/manifest.json`);
+    } catch {
+      manifest = null;
+    }
+  }
+
+  const sz = (manifest && manifest.size) || [512, 512];
+  const centerPose = (manifest && manifest.poses && manifest.poses.find((p) => p.name === "center")) || {};
+  // Every picture by the name and place the manifest gives it, as the HUD does.
+  const patch = (info) => {
+    const img = el("img", { class: "face-patch", alt: "", style: "display:none" });
+    if (!info || !info.file) return img;
+    const r = info.rect || [0, 0, sz[0], sz[1]];
+    img.src = `/avatar/${key}/${info.file}?t=${t}`;
+    img.style.left = (r[0] / sz[0] * 100).toFixed(2) + "%";
+    img.style.top = (r[1] / sz[1] * 100).toFixed(2) + "%";
+    img.style.width = (r[2] / sz[0] * 100).toFixed(2) + "%";
+    img.style.height = (r[3] / sz[1] * 100).toFixed(2) + "%";
+    return img;
+  };
+
+  const baseImg = el("img", { class: "face-base", src: `/avatar/${key}/${centerPose.base || "pose_center.webp"}?t=${t}`, alt: "Base" });
+  const eyeHalf = patch(centerPose.eyes && centerPose.eyes.half);
+  const eyeClosed = patch(centerPose.eyes && centerPose.eyes.closed);
+  const mouths = {};
+  for (const [shape, info] of Object.entries(centerPose.mouth || {})) mouths[shape] = patch(info);
+
+  stage.append(baseImg, ...Object.values(mouths), eyeHalf, eyeClosed);
+
+  let shown = null;
+  const showMouth = (shape) => {
+    const next = mouths[shape] || null;      // A and X are the photo's own closed mouth
+    if (next === shown) return;
+    if (shown) shown.style.display = "none";
+    if (next) next.style.display = "block";
+    shown = next;
+  };
+
+  let blinkTimer = null;
+  const doBlink = () => {
+    eyeHalf.style.display = "block";
+    setTimeout(() => {
+      eyeHalf.style.display = "none";
+      eyeClosed.style.display = "block";
+      setTimeout(() => {
+        eyeClosed.style.display = "none";
+        eyeHalf.style.display = "block";
+        setTimeout(() => {
+          eyeHalf.style.display = "none";
+        }, 70);
+      }, 100);
+    }, 70);
+  };
+  blinkTimer = setInterval(doBlink, 3500);
+  setTimeout(doBlink, 600);
+
+  const sampleSentence = "Hello, this is my new face.";
+  const sampleTextEl = el("p", { class: "card-sub", style: "font-style: italic; margin-top: 6px", text: `“${sampleSentence}”` });
+
+  let audioObj = null;
+  let mouthInt = null;
+
+  const playSample = async () => {
+    try {
+      if (audioObj) {
+        audioObj.pause();
+        audioObj = null;
+      }
+      if (mouthInt) {
+        clearInterval(mouthInt);
+        mouthInt = null;
+      }
+      showMouth("X");
+
+      const v = voiceNow();
+      const said = await api("POST", "/api/sample/visemes", { provider: v.provider || "kokoro", voice: v.voice || "af_heart", speed: v.speed || 1.0, text: sampleSentence });
+      const cues = said.cues || [];
+      const wav = Uint8Array.from(atob(said.audio), (c) => c.charCodeAt(0));
+      audioObj = new Audio(URL.createObjectURL(new Blob([wav], { type: "audio/wav" })));
+
+      // The mouth follows the audio's own clock, so it stays in time even if playback stutters.
+      const audio = audioObj;
+      mouthInt = setInterval(() => {
+        let shape = "X";
+        for (const [at, s] of cues) { if (at <= audio.currentTime) shape = s; else break; }
+        showMouth(shape);
+      }, 25);
+
+      audioObj.onended = () => {
+        if (mouthInt) clearInterval(mouthInt);
+        showMouth("X");
+      };
+      await audioObj.play();
+    } catch {
+      if (mouthInt) clearInterval(mouthInt);
+      showMouth("X");
+    }
+  };
+
+  playSample();
+
+  const replayBtn = el("button", { class: "btn small ghost", type: "button", onclick: playSample }, icon("play"), "Hear sample again");
+
+  const cleanup = () => {
+    if (blinkTimer) clearInterval(blinkTimer);
+    if (mouthInt) clearInterval(mouthInt);
+    if (audioObj) audioObj.pause();
+  };
+
+  const useBtn = el("button", { class: "btn primary", type: "button", text: "Use this face", onclick: async () => {
+    cleanup();
+    dialog.close();
+    try {
+      await api("POST", `/api/personas/${key}/face`, { enabled: true });
+      if (S.her) S.her.face = { available: true, enabled: true };
+      toast(`Animated face enabled for ${herNow("name") || assistant()}`);
+      if (location.hash === "#identity") render();
+    } catch (e) { toast(e.message, true); }
+  }});
+
+  const cancelBtn = el("button", { class: "btn ghost", type: "button", text: "Cancel", onclick: async () => {
+    cleanup();
+    dialog.close();
+    try {
+      await api("POST", `/api/personas/${key}/face/delete`, {});
+      if (S.her && S.her.face) S.her.face = { available: false, enabled: false };
+      toast("Cancelled");
+    } catch { /* ignore */ }
+  }});
+
+  const box = el("div", { class: "face-preview-box" },
+    el("h2", { text: "Preview animated face" }),
+    stage,
+    sampleTextEl,
+    replayBtn,
+    el("p", { class: "muted small", style: "text-align: center; max-width: 320px", text: "Blinks naturally and moves in the HUD when speaking or listening." }),
+    el("div", { class: "actions", style: "justify-content: flex-end; width: 100%; gap: 8px" }, cancelBtn, useBtn)
+  );
+
+  dialog.replaceChildren(box);
+  dialog.showModal();
+}
+
+function modelledOnCard() {
+  const her = S.her;
+  const container = el("div", { class: "stack", style: "gap: 12px" }, el("p", { class: "muted", text: "Loading person details…" }));
+  const box = card("Modelled on", "Link this persona to a person in Photos. Moments featuring them become their own memories when asked.", container);
+
+  const refresh = async () => {
+    try {
+      const [linkRes, peopleRes] = await Promise.all([
+        api("GET", `/api/personas/${her.key}/link`).catch(() => ({ link: null })),
+        api("GET", "/api/people").catch(() => ({ people: [] }))
+      ]);
+      const currentLink = linkRes.link;
+      const namedPeople = (peopleRes.people || []).filter((p) => p.state === "named" && p.name);
+
+      const opts = [[null, "No one (generic persona)"], ...namedPeople.map((p) => [p.id, p.name])];
+      let selectedPid = currentLink ? currentLink.person_id : null;
+      let bornVal = currentLink ? (currentLink.born || "") : "";
+
+      const sel = select(opts, selectedPid, async (pid) => {
+        selectedPid = pid;
+        if (pid) {
+          const match = namedPeople.find((p) => p.id === pid);
+          if (match && match.born && !bornVal) {
+            bornVal = match.born;
+            bornInput.value = bornVal;
+          }
+        }
+        await api("POST", `/api/personas/${her.key}/link`, { person_id: selectedPid, born: bornVal ? Number(bornVal) : 0 });
+        toast("Persona link updated");
+      }, "Modelled on person");
+
+      const bornInput = el("input", { type: "number", placeholder: "e.g. 1964", value: bornVal ? String(bornVal) : "", "aria-label": "Year born" });
+      bornInput.addEventListener("change", async () => {
+        bornVal = bornInput.value ? Number(bornInput.value) : 0;
+        await api("POST", `/api/personas/${her.key}/link`, { person_id: selectedPid, born: bornVal });
+        toast("Birth year saved");
+      });
+
+      const hasFace = her.face && her.face.available;
+      const faceRow = el("div", { class: "row", style: "align-items:center;margin-top:8px" },
+        el("div", { class: "grow" },
+          el("div", { class: "label", text: "Animated face" }),
+          el("div", { class: "help", text: hasFace ? (her.face.enabled ? "Active in HUD." : "Disabled (showing glowing rings).") : "No face prepared yet. Open any photo in Photos and click “Use as face”." })),
+        hasFace ? el("div", { class: "actions", style: "align-items:center;gap:10px" },
+          el("img", { src: `/avatar/${her.key}/base.webp?v=${Date.now()}`, style: "width:36px;height:36px;border-radius:50%;object-fit:cover;border:1px solid var(--border)" }),
+          toggle(her.face.enabled, async (v) => {
+            const out = await api("POST", `/api/personas/${her.key}/face`, { enabled: v });
+            her.face.enabled = out.enabled;
+            toast(v ? "Animated face enabled in HUD" : "HUD switched back to rings");
+            refresh();
+          }, "Toggle animated face"),
+          el("button", { class: "btn small danger", type: "button", text: "Delete", onclick: async () => {
+            if (!confirm(`Remove animated face for ${herNow("name") || assistant()}?`)) return;
+            await api("POST", `/api/personas/${her.key}/face/delete`, {});
+            her.face = { available: false, enabled: false };
+            toast("Face removed");
+            refresh();
+          } })) : null
+      );
+
+      container.replaceChildren(
+        row("Person", "Which person in your photos this persona speaks as.", sel),
+        row("Year born", "Resolves age queries like “your 60th birthday” or “when you were 30”.", bornInput),
+        faceRow
+      );
+    } catch (e) {
+      container.replaceChildren(el("p", { class: "muted", text: e.message }));
+    }
+  };
+
+  refresh();
+  return box;
 }
 
 
@@ -1812,8 +2311,10 @@ function pagePeople() {
     const line = summary();
     const bar = s.on && m.present && s.status.left > 0 && s.photos > 0 ? el("div", { class: "bar-meter" }, el("i", { style: `width:${Math.max(2, ((s.photos - s.status.left) / s.photos) * 100).toFixed(1)}%` })) : null;
     return el("section", { class: "card pe-top" },
-      el("div", { class: "pe-switch" }, el("div", { class: "grow" }, el("h2", {}, "Recognise people", info("Finds the faces in your photos so you can name them once. Faces are read on this PC, kept only here, deleted with the person, and never sent anywhere. A name is only ever one you type.")),
-        line && el("div", { class: "muted", text: line })),
+      el("div", { class: "pe-switch" }, el("div", { class: "grow" },
+        el("h2", { text: "Recognise people" }),
+        el("p", { class: "card-sub", text: "Finds the faces in your photos so you can name them once. Faces are read on this PC, kept only here, deleted with the person, and never sent anywhere. A name is only ever one you type." }),
+        line && el("div", { class: "muted", style: "margin-top:6px;font-weight:560", text: line })),
         !s.allowed ? el("span", { class: "muted", text: "Off in config.yaml" }) : !s.on ? el("button", { class: "btn small", type: "button", text: "Turn it on again", onclick: () => onSwitch(true) }) : null),
       s.on && !m.present && el("div", { class: "notice" }, el("span", { text: `Needs two face models · ${m.mb} MB` }),
         el("button", { class: "btn primary small", type: "button", text: "Get them…", onclick: fetchModels })),
@@ -1935,14 +2436,20 @@ function pagePeople() {
   const draw = () => {
     const s = st.s;
     if (!s.enabled) { body.replaceChildren(el("div", { class: "gp-empty" }, icon("people"), el("h2", { text: "Photos are off" }))); return; }
-    const parts = [topCard()];
     const show = s.on || s.status.faces > 0;
-    if (show && s.questions.length) parts.push(el("section", { class: "card" }, el("h2", { text: "Is this…?" }), ...s.questions.map(questionCard)));
-    if (show && s.same.length) parts.push(el("section", { class: "card" }, el("h2", { text: "The same person?" }), ...s.same.map(sameCard)));
+    const qCards = [];
+    if (show && s.questions.length) qCards.push(el("section", { class: "card" }, el("h2", { text: "Is this…?" }), ...s.questions.map(questionCard)));
+    if (show && s.same.length) qCards.push(el("section", { class: "card" }, el("h2", { text: "The same person?" }), ...s.same.map(sameCard)));
+    const top = qCards.length
+      ? el("div", { class: "page-grid", style: "margin-bottom:18px" }, el("div", { class: "page-col" }, topCard()), el("div", { class: "page-col" }, ...qCards))
+      : el("div", { class: "narrow-left" }, topCard());
+    const parts = [top];
     if (show && s.people.length) parts.push(el("section", { class: "card" }, el("h2", { text: "People" }), el("div", { class: "pe-grid" }, ...s.people.map(tile))));
     if (show && st.g && (st.g.items.length || st.g.singles)) {
       const g = st.g;
-      parts.push(el("section", { class: "card" }, el("h2", {}, "Who are these?", info("Groups of faces that look like one person. Name a group once and every photo of them is found.")),
+      parts.push(el("section", { class: "card" },
+        el("h2", { text: "Who are these?" }),
+        el("p", { class: "card-sub", text: "Groups of faces that look like one person. Name a group once and every photo of them is found." }),
         el("div", { class: "pe-grid" }, ...g.items.map(tile)),
         (g.more || (!PE.singles && g.singles > 0) || PE.singles) && el("div", { class: "add-line" },
           g.more && el("button", { class: "btn", type: "button", text: "Show more", onclick: async () => {
@@ -1967,7 +2474,7 @@ function pagePeople() {
     } catch (e) { /* the next tick tries again */ }
   }, 3000);
   reload();
-  return el("div", {}, head("People"), body);
+  return el("div", {}, head("People", "Recognise the people in your photo library on this PC."), body);
 }
 
 
@@ -2034,7 +2541,7 @@ function pageRemembered() {
 
   const draw = (info) => {
     if (!info.enabled) {
-      body.replaceChildren(card(null, null, el("div", { class: "empty", text: "Memory is switched off. Set memory: enabled: true in your config to turn it on." })));
+      body.replaceChildren(el("div", { class: "narrow-left" }, card(null, null, el("div", { class: "empty", text: "Memory is switched off. Set memory: enabled: true in your config to turn it on." }))));
       return;
     }
     const c = info.counts;
@@ -2093,19 +2600,22 @@ function pageRemembered() {
       day, (v) => { M.day = v; drawDay(v); }, "Day") : null;
 
     body.replaceChildren(...[
-      card("Search", `Look through everything ${assistant()} remembers, as ${assistant()} would.`,
-        el("div", { class: "add-line", style: "border-top:0" }, search), results),
-      card("Learned about you", `Facts ${assistant()} has picked up. Forgetting one ends it and keeps it with its date; deleting removes it for good.`,
-        el("div", { class: "segbar" }, segmented([["current", `Current (${c.fact.current})`], ["ended", `Ended (${c.fact.ended})`]], M.which,
-          (v) => { M.which = v; drawFacts(); }, "Which facts")),
-        facts, M.which === "current" && el("div", { class: "add-line" }, add, el("button", { class: "btn", type: "button", text: "Add", onclick: addFact }))),
-      card("Diary", `One line for each thing you asked, kept on this PC. What a skill read out (messages, the screen) is never written.`,
-        dayPick && el("div", { class: "segbar" }, dayPick), diary),
-      fieldsCard("memory", "Learning and keeping", null),
       info.cloud && (settingNow("memory.consolidate.enabled") || info.learn)
         ? el("div", { class: "banner info" }, el("span", { class: "grow", text: `${assistant()}'s model runs in the cloud, so with background learning on, what you said (never ${assistant()}'s replies, and nothing from messages or the screen) is sent to it while you're away.` }))
         : null,
-      el("p", { class: "muted small", title: `Also plain text in ${info.folder}: facts.md and the diary folder open in Notepad, and edits are picked up within a few minutes.`, text: `${c.diary.current} diary lines · ${c.fact.current} learned facts · ${c.reflection.current} day summaries` })].filter(Boolean));   // (a bare null would be written as the word "null")
+      el("div", { class: "page-grid" },
+        el("div", { class: "page-col" },
+          card("Search", `Look through everything ${assistant()} remembers, as ${assistant()} would.`,
+            el("div", { class: "add-line", style: "border-top:0" }, search), results),
+          card("Learned about you", `Facts ${assistant()} has picked up. Forgetting one ends it and keeps it with its date; deleting removes it for good.`,
+            el("div", { class: "segbar" }, segmented([["current", `Current (${c.fact.current})`], ["ended", `Ended (${c.fact.ended})`]], M.which,
+              (v) => { M.which = v; drawFacts(); }, "Which facts")),
+            facts, M.which === "current" && el("div", { class: "add-line" }, add, el("button", { class: "btn", type: "button", text: "Add", onclick: addFact })))),
+        el("div", { class: "page-col" },
+          card("Diary", `One line for each thing you asked, kept on this PC. What a skill read out (messages, the screen) is never written.`,
+            dayPick && el("div", { class: "segbar" }, dayPick), diary),
+          fieldsCard("memory", "Learning and keeping", null))),
+      el("p", { class: "muted small", style: "margin-top:16px", title: `Also plain text in ${info.folder}: facts.md and the diary folder open in Notepad, and edits are picked up within a few minutes.`, text: `${c.diary.current} diary lines · ${c.fact.current} learned facts · ${c.reflection.current} day summaries` })].filter(Boolean));   // (a bare null would be written as the word "null")
   };
   reload();
   return el("div", {}, head(`What ${assistant()} remembers`, `${assistant()} keeps a diary of what you ask and learns facts about you. It all stays on this PC.`), body);
@@ -2285,8 +2795,8 @@ function pageModel() {
         setSetting("brain.provider", "api");
         render();
       } });
-    body = el("div", {},
-      !isLocalUrl(url) && el("div", { class: "banner info" }, el("span", { class: "grow", text: `Any service that speaks the OpenAI chat API. What you say, and what ${assistant()} reads on your screen to answer, is sent to it.` })),
+    body = el("div", { class: "page-col" },
+      !isLocalUrl(url) && el("div", { class: "banner info", style: "margin-bottom:0" }, el("span", { class: "grow", text: `Any service that speaks the OpenAI chat API. What you say, and what ${assistant()} reads on your screen to answer, is sent to it.` })),
       el("section", { class: "card" },
         row("Service address", F("brain.api.url").help, el("div", { class: "stack", style: "width:100%;gap:0" }, urlInput, picks), { wide: true, changed: "brain.api.url" in S.draft.settings }),
         row("API key", keySet ? "Saved in MARY's .env file, never shown again." : "Kept in MARY's .env file, never shown again. Not needed for a server on this PC.",
@@ -2297,12 +2807,13 @@ function pageModel() {
     const cloud = source === "cloud";
     const add = el("input", { type: "text", placeholder: cloud ? "Add a cloud model, like gpt-oss:120b-cloud" : "Add a model, like llama3.2:3b", "aria-label": "Model name" });
     add.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); addModel(add, cloud); } });
-    body = el("div", {},
-      cloud && el("div", { class: "banner info" }, el("span", { class: "grow", text: `Cloud models run on Ollama's servers, so what you say, and what ${assistant()} reads on your screen to answer, is sent to ollama.com. They need a free ollama.com account: sign this PC in once by running “ollama signin”.` })),
+    body = el("div", { class: "page-col" },
+      cloud && el("div", { class: "banner info", style: "margin-bottom:0" }, el("span", { class: "grow", text: `Cloud models run on Ollama's servers, so what you say, and what ${assistant()} reads on your screen to answer, is sent to ollama.com. They need a free ollama.com account: sign this PC in once by running “ollama signin”.` })),
       note,
       el("section", { class: "card" },
-        el("div", { class: "card-head" }, el("div", {}, el("h2", {}, cloud ? "Cloud models" : "Models on this PC",
-          info(cloud ? "Fast, and large enough for hard requests. They use your ollama.com allowance." : "Free and private. Bigger ones follow instructions better but answer slower.")))),
+        el("div", { class: "card-head" }, el("div", {},
+          el("h2", { text: cloud ? "Cloud models" : "Models on this PC" }),
+          el("p", { class: "card-sub", text: cloud ? "Fast, and large enough for hard requests. They use your ollama.com allowance." : "Free and private. Bigger ones follow instructions better but answer slower." }))),
         list,
         el("div", { class: "add-line" }, add, el("button", { class: "btn", type: "button", onclick: () => addModel(add, cloud) }, icon(cloud ? "plus" : "download"), cloud ? "Add" : "Download")),
         pullLine(),
@@ -2313,15 +2824,16 @@ function pageModel() {
   thinkRow.hidden = provider === "ollama";   // shown once the list says the model offers levels
   const local = provider === "ollama" && !isCloudName(current);
   return el("div", {},
-    head("Model", `The language model that thinks for ${assistant()}.`),
-    summary,
-    el("div", { class: "source" }, el("span", { class: "muted", text: "Where it runs" }),
+    head("Model", `The language model that thinks for ${assistant()}.`,
       segmented([["local", "On this PC"], ["cloud", "Ollama Cloud"], ["api", "Another service"]], source, (v) => { S.modelSource = v; render(); }, "Where it runs")),
-    body,
-    el("section", { class: "card" }, el("div", { class: "card-head" }, el("div", {}, el("h2", { text: "Thinking" }))),
-      settingRow(F("llm.think_by_default")), thinkRow),
-    el("details", { class: "more" }, el("summary", {}, "Advanced", icon("chevron")),
-      el("section", { class: "card" }, settingRow(F("brain.mode")), local && settingRow(F("llm.unload_on_quit")), local && settingRow(F("llm.num_thread")))));
+    el("div", { class: "page-grid asym" },
+      body,
+      el("div", { class: "page-col" },
+        summary,
+        el("section", { class: "card" }, el("div", { class: "card-head" }, el("div", {}, el("h2", { text: "Thinking" }))),
+          settingRow(F("llm.think_by_default")), thinkRow),
+        el("details", { class: "more" }, el("summary", {}, "Advanced", icon("chevron")),
+          el("section", { class: "card" }, settingRow(F("brain.mode")), local && settingRow(F("llm.unload_on_quit")), local && settingRow(F("llm.num_thread")))))));
 }
 
 function pageListening() {
@@ -2330,10 +2842,13 @@ function pageListening() {
     head("Listening", `How ${assistant()} hears you.`),
     cloud && !S.state.keys.elevenlabs && el("div", { class: "banner" }, el("span", { class: "grow", text: "ElevenLabs isn't connected, so speech is recognised on this PC for now." }),
       el("a", { class: "btn small", href: "#connections", text: "Connect" })),
-    fieldsCard("listening", "Starting a conversation", "Wake phrases are set on Wake word, for each persona.", ["wakeword.enabled", "hotkey.combo"]),
-    fieldsCard("listening", "Microphone", null, ["audio.input_device", "audio.clean.enabled"]),
-    fieldsCard("listening", "Recognition", null, ["stt.provider", "stt.words", "stt.model"]),
-    fieldsCard("listening", "While you talk", null, ["vad.followup_s", "audio.chime", "vad.long_end_silence_ms"]));
+    el("div", { class: "page-grid" },
+      el("div", { class: "page-col" },
+        fieldsCard("listening", "Starting a conversation", "Wake phrases are set on Wake word, for each persona.", ["wakeword.enabled", "hotkey.combo"]),
+        fieldsCard("listening", "Recognition", null, ["stt.provider", "stt.words", "stt.model"])),
+      el("div", { class: "page-col" },
+        fieldsCard("listening", "Microphone", null, ["audio.input_device", "audio.clean.enabled"]),
+        fieldsCard("listening", "While you talk", null, ["vad.followup_s", "audio.chime", "vad.long_end_silence_ms"]))));
 }
 
 function pageSkills() {
@@ -2345,9 +2860,10 @@ function pageSkills() {
   return el("div", {},
     head("Skills", `What ${assistant()} can do on this PC. Fewer skills make the prompt shorter, so replies start sooner.`,
       canReset && el("button", { class: "btn", type: "button", text: "Reset to default", onclick: () => resetSetting("skills") })),
-    Object.entries(groups).map(([group, list]) => card(group, null, el("div", { class: "list", style: "padding-bottom:6px" }, list.map((s) => el("div", { class: "item" },
-      el("div", { class: "grow" }, el("div", { style: "font-weight:560", text: s.title }), el("div", { class: "sub", text: s.about })),
-      toggle(on.has(s.name), (v) => { v ? on.add(s.name) : on.delete(s.name); setSetting("skills", S.state.skills.map((x) => x.name).filter((n) => on.has(n))); }, s.title)))))));
+    el("div", { class: "page-grid" },
+      Object.entries(groups).map(([group, list]) => card(group, null, el("div", { class: "list", style: "padding-bottom:6px" }, list.map((s) => el("div", { class: "item" },
+        el("div", { class: "grow" }, el("div", { style: "font-weight:560", text: s.title }), el("div", { class: "sub", text: s.about })),
+        toggle(on.has(s.name), (v) => { v ? on.add(s.name) : on.delete(s.name); setSetting("skills", S.state.skills.map((x) => x.name).filter((n) => on.has(n))); }, s.title))))))));
 }
 
 function pageConnections() {
@@ -2383,16 +2899,19 @@ function pageConnections() {
   input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); saveKey(); } });
   return el("div", {},
     head("Connections", "Services beyond this PC. Keys are kept in MARY's .env file and never shown again."),
-    card("ElevenLabs", "Optional: faster speech recognition, and your own or cloned voices.",
-      row("Status", null, el("span", { class: `pill ${has ? "good" : ""}`, text: has ? "Connected" : "Not connected" })),
-      has && row("Credits", null, el("div", { style: "width:100%" }, credits)),
-      row(has ? "Replace the key" : "API key", "Create one in your ElevenLabs account, under API keys.",
-        el("div", { class: "actions", style: "width:100%;flex-wrap:nowrap" }, input, el("button", { class: "btn primary", type: "button", text: "Save", onclick: saveKey })))),
-    card("Ollama", "Runs the language model on this PC, and passes requests on to Ollama's cloud models.", row("Status", null, el("span", { class: "actions" }, ollama, ollamaNote))),
-    card("Model service", "Optional: any service that speaks the OpenAI chat API, set up on the Model page.",
-      row("Address", null, el("span", { class: service ? "" : "muted", text: service ? hostOf(service) : "Not set" })),
-      row("API key", null, el("span", { class: `pill ${S.state.keys.llm ? "good" : ""}`, text: S.state.keys.llm ? "Saved" : "Not set" })),
-      el("div", { class: "add-line", style: "justify-content:flex-end" }, el("a", { class: "btn", href: "#model", onclick: () => { S.modelSource = "api"; }, text: "Set it up" }))));
+    el("div", { class: "page-grid" },
+      el("div", { class: "page-col" },
+        card("ElevenLabs", "Optional: faster speech recognition, and your own or cloned voices.",
+          row("Status", null, el("span", { class: `pill ${has ? "good" : ""}`, text: has ? "Connected" : "Not connected" })),
+          has && row("Credits", null, el("div", { style: "width:100%" }, credits)),
+          row(has ? "Replace the key" : "API key", "Create one in your ElevenLabs account, under API keys.",
+            el("div", { class: "actions", style: "width:100%;flex-wrap:nowrap" }, input, el("button", { class: "btn primary", type: "button", text: "Save", onclick: saveKey })), { wide: true }))),
+      el("div", { class: "page-col" },
+        card("Ollama", "Runs the language model on this PC, and passes requests on to Ollama's cloud models.", row("Status", null, el("span", { class: "actions" }, ollama, ollamaNote))),
+        card("Model service", "Optional: any service that speaks the OpenAI chat API, set up on the Model page.",
+          row("Address", null, el("span", { class: service ? "" : "muted", text: service ? hostOf(service) : "Not set" })),
+          row("API key", null, el("span", { class: `pill ${S.state.keys.llm ? "good" : ""}`, text: S.state.keys.llm ? "Saved" : "Not set" })),
+          el("div", { class: "add-line", style: "justify-content:flex-end" }, el("a", { class: "btn", href: "#model", onclick: () => { S.modelSource = "api"; }, text: "Set it up" }))))));
 }
 
 const RENDER = { identity: pageIdentity, personality: pagePersonality, voice: pageVoice, wake: pageWake,
@@ -2410,6 +2929,38 @@ function currentPage() {
   return RENDER[page] ? [page] : ["identity"];
 }
 
+const THEMES = ["auto", "light", "dark"];
+const THEME_LABELS = { auto: "Appearance: Auto", light: "Appearance: Light", dark: "Appearance: Dark" };
+
+function applyTheme(mode) {
+  S.theme = THEMES.includes(mode) ? mode : "auto";
+  if (S.theme === "auto") delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = S.theme;
+  try { localStorage.setItem("mary_theme", S.theme); } catch { /* ignore */ }
+}
+
+function renderTopbar(page = currentPage()[0]) {
+  const topbar = document.getElementById("topbar");
+  if (!topbar || !S.state) return;
+  const isPersona = PERSONA_PAGES.has(page);
+  const titleText = PAGE_TITLES[page] || "Settings";
+  const left = el("div", { class: "topbar-left" },
+    el("div", { class: "topbar-nav" },
+      el("button", { type: "button", "aria-label": "Back", title: "Back", onclick: () => history.back() }, icon("back")),
+      el("button", { type: "button", "aria-label": "Forward", title: "Forward", onclick: () => history.forward() }, icon("next"))),
+    el("span", { class: "topbar-title", text: titleText }),
+    el("span", { class: "pill", text: isPersona ? `Persona · ${assistant()}` : "This PC" }));
+  const right = el("div", { class: "topbar-right" },
+    dirty() && el("button", { class: "btn small", type: "button", text: "Revert", onclick: discard }),
+    dirty() && el("button", { class: "btn small primary", type: "button", text: "Save", onclick: () => save() }),
+    el("button", { class: "theme-btn", type: "button", title: "Switch light, dark or system appearance", onclick: () => {
+      const next = THEMES[(THEMES.indexOf(S.theme || "auto") + 1) % THEMES.length];
+      applyTheme(next);
+      renderTopbar(page);
+    } }, THEME_LABELS[S.theme || "auto"]));
+  topbar.replaceChildren(left, right);
+}
+
 function renderBar(busy) {
   const bar = document.getElementById("bar");
   let parts = null;
@@ -2425,11 +2976,13 @@ function renderBar(busy) {
     el("button", { class: "btn", type: "button", text: "OK", onclick: () => { S.saved = false; renderBar(); } })];
   bar.hidden = !parts;
   if (parts) bar.replaceChildren(...parts);
+  renderTopbar();
 }
 
 function render() {
   const [page, sub] = currentPage();
   renderSide(page);
+  renderTopbar(page);
   const y = window.scrollY;
   document.getElementById("main").replaceChildren(RENDER[page](sub));
   window.scrollTo(0, y);
@@ -2437,6 +2990,7 @@ function render() {
 }
 
 async function boot() {
+  try { applyTheme(localStorage.getItem("mary_theme") || "auto"); } catch { applyTheme("auto"); }
   try {
     S.state = await api("GET", "/api/state");
     S.editing = S.state.settings.persona;
@@ -2446,6 +3000,15 @@ async function boot() {
     return;
   }
   window.addEventListener("hashchange", () => { render(); window.scrollTo(0, 0); });
+  window.addEventListener("keydown", (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+      const s = document.querySelector("#side-search input");
+      if (s) { e.preventDefault(); s.focus(); s.select(); }
+    } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s" && dirty()) {
+      e.preventDefault();
+      save();
+    }
+  });
   window.addEventListener("beforeunload", (e) => { if (dirty() || (S.trainer && S.trainer.busy)) { e.preventDefault(); e.returnValue = ""; } });
   render();
 }

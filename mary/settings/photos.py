@@ -33,10 +33,21 @@ def _wrap(fn, *args, **kw):
 
 
 def state(lib, ing) -> dict:
+    from mary.photos import clip as clip_mod
+
     if lib is None:
         return {"enabled": False}
-    progress = ing.progress() if ing is not None else {**lib.status(), "state": "idle", "average_ms": {}, "text": True,
-                                                       "ocr": False, "places": lib.gazetteer.available}
+    if ing is not None:
+        progress = ing.progress()
+    else:
+        st = lib.status()
+        progress = {**st, "state": "idle", "average_ms": {}, "text": True, "ocr": False,
+                    "places": lib.gazetteer.available,
+                    "clip": {**clip_mod.models_status(lib), "left": st.get("clip_left", 0)},
+                    "vision": {"on": bool(lib.settings.get("vision", {}).get("enabled", False)),
+                               "allow_cloud": bool(lib.settings.get("vision", {}).get("allow_cloud", False)),
+                               "left": st.get("vision_left", 0), "seen": st.get("seen", 0)},
+                    "moments": st.get("moments", 0)}
     folders = lib.folders()
     return {"enabled": True, "folders": folders, "progress": progress,
             "suggestions": sources.suggestions([f["path"] for f in folders]),
@@ -57,6 +68,39 @@ def get_places(lib, fetch=None) -> dict:
         raise SettingsError("Couldn't fetch the list of places. Check the internet connection and try again.") from None
     named = lib.use_gazetteer(places.Gazetteer.open(lib.gazetteer_path))
     return {"places": count, "photos_named": named}
+
+
+def get_clip(lib, ing, fetch=None) -> dict:
+    """Fetch the two CLIP picture-search models (about 590 MB from huggingface.co/Qdrant). Only ever run because the person
+    pressed the button that says so; nothing of theirs is sent."""
+    from mary.photos import clip as clip_mod
+
+    lib = need(lib)
+    try:
+        clip_mod.fetch(clip_mod.models_folder(lib), fetch)
+    except Exception:
+        raise SettingsError("Couldn't fetch the picture search models. Check the internet connection and try again.") from None
+    if ing is not None:
+        ing._clip_at = 0.0
+        ing.wake()
+    return {"mb": clip_mod.models_status(lib)["mb"]}
+
+
+def vision_switch(lib, ing, body: dict) -> dict:
+    """Switch background photo descriptions on or off, or allow a cloud vision model (with an explicit opt-in)."""
+    lib = need(lib)
+    vcfg = dict(lib.settings.get("vision") or {})
+    if "enabled" in body:
+        vcfg["enabled"] = bool(body["enabled"])
+    if "allow_cloud" in body:
+        vcfg["allow_cloud"] = bool(body["allow_cloud"])
+    if "model" in body and isinstance(body["model"], str):
+        vcfg["model"] = body["model"].strip()
+    lib.settings["vision"] = vcfg
+    if ing is not None:
+        ing.wake()
+    return {"enabled": bool(vcfg.get("enabled", False)), "allow_cloud": bool(vcfg.get("allow_cloud", False)),
+            "model": str(vcfg.get("model", ""))}
 
 
 def pick_folder() -> str | None:
@@ -121,7 +165,7 @@ def album(lib, fid, body: dict) -> dict:
     return _wrap(lib.set_album, int(fid), taken, body.get("scope") or "unsure", place)
 
 
-FILTERS = ("year", "month", "place", "folder", "q", "flag", "person")
+FILTERS = ("year", "month", "place", "folder", "q", "flag", "person", "moment")
 
 
 def _filters(q: dict) -> dict:
@@ -132,7 +176,7 @@ def _filters(q: dict) -> dict:
             out[name] = value
     if "flag" in out and out["flag"] not in library.FLAGS:
         raise SettingsError("That isn't something to filter by.")
-    for name in ("year", "month", "folder", "person"):
+    for name in ("year", "month", "folder", "person", "moment"):
         if name in out:
             try:
                 out[name] = int(out[name])
@@ -147,6 +191,20 @@ def shaped(item: dict) -> dict:
     return {**item, "thumb": f"/thumb/{item['id']}?v={item['version']}", "view": f"/view/{item['id']}?v={item['version']}"}
 
 
+def shaped_moment(item: dict, lib=None) -> dict:
+    """A moment as the page gets it: with its cover thumbnail and, when opened, its ranked photos."""
+    cid = item.get("cover_id")
+    ver = 1
+    if cid and lib is not None:
+        r = lib._photo_row(int(cid))
+        if r is not None:
+            ver = r["updated"]
+    out = {**item, "thumb": f"/thumb/{cid}?v={ver}" if cid else ""}
+    if "items" in out:
+        out["items"] = [shaped(i) for i in out["items"]]
+    return out
+
+
 def listing(lib, q: dict) -> dict:
     lib = need(lib)
     one = lambda name, default="": (q.get(name) or [default])[0]  # noqa: E731
@@ -156,6 +214,49 @@ def listing(lib, q: dict) -> dict:
         offset = 0
     out = lib.list(order=one("order", "newest"), limit=60, offset=offset, **_filters(q))
     return {**out, "items": [shaped(i) for i in out["items"]]}
+
+
+def moments(lib, q: dict) -> dict:
+    lib = need(lib)
+    one = lambda name, default="": (q.get(name) or [default])[0]  # noqa: E731
+    try:
+        offset = max(0, int(one("offset", "0")))
+    except ValueError:
+        offset = 0
+    flt = _filters(q)
+    out = lib.moments(q=flt.get("q", ""), person=flt.get("person"), year=flt.get("year"),
+                      place=flt.get("place", ""), limit=60, offset=offset)
+    return {**out, "items": [shaped_moment(m, lib) for m in out["items"]]}
+
+
+def moment(lib, mid) -> dict:
+    lib = need(lib)
+    got = lib.moment(int(mid))
+    if got is None:
+        raise SettingsError("That moment isn't there any more.")
+    return shaped_moment(got, lib)
+
+
+def _mid(body: dict, key: str = "id") -> int:
+    v = body.get(key)
+    if not isinstance(v, int) or isinstance(v, bool):
+        raise SettingsError("That moment isn't there any more.")
+    return v
+
+
+def moment_rename(lib, body: dict) -> dict:
+    lib = need(lib)
+    return shaped_moment(_wrap(lib.rename_moment, _mid(body), str(body.get("title") or "")), lib)
+
+
+def moment_merge(lib, body: dict) -> dict:
+    lib = need(lib)
+    return shaped_moment(_wrap(lib.merge_moments, _mid(body, "keep"), _mid(body, "other")), lib)
+
+
+def moment_split(lib, body: dict) -> dict:
+    lib = need(lib)
+    return shaped_moment(_wrap(lib.split_moment, _mid(body), _ids(lib, body), str(body.get("title") or "")), lib)
 
 
 def facets(lib, q: dict) -> dict:
@@ -215,7 +316,7 @@ def show(lib, pid) -> dict:
 def _ids(lib, body: dict) -> list[int]:
     if body.get("ids") is not None:
         ids = body["ids"]
-        if not isinstance(ids, list) or not all(isinstance(i, int) for i in ids):
+        if not isinstance(ids, list) or not all(isinstance(i, int) and not isinstance(i, bool) for i in ids):
             raise SettingsError("Pick some photos first.")
     elif body.get("filter") is not None:
         ids = lib.ids(**_filters({k: [v] for k, v in (body["filter"] or {}).items()}))
@@ -257,3 +358,4 @@ def merge(lib, body: dict) -> dict:
 
 def remove(lib, body: dict) -> dict:
     return {"removed": need(lib).remove(_ids(lib, body))}
+

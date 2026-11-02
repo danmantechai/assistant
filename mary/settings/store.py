@@ -429,6 +429,7 @@ def persona_info(key: str) -> dict:
         count = len([t for t in re.split(r"\n\s*\n", file.read_text(encoding="utf-8")) if t.strip()])
         texts.append({"file": file.name, "count": count, "label": file.stem.replace("_", " ")})
     voice = dict(data.get("voice") or {})
+    from mary.avatar import store as avatar_store
     return {
         "key": her.key, "private": private, "ships": (personas.SHIPPED / her.key / "persona.yaml").exists(),
         "active": her.key == layers().key,
@@ -438,6 +439,7 @@ def persona_info(key: str) -> dict:
         "voice": voice, "soul": her.soul, "speech": her.speech, "texting": her.texting,
         "wake": [wake_info(w) for w in her.wake],
         "lore": lore, "texts": texts,
+        "face": {"available": avatar_store.available(her.key), "enabled": avatar_store.enabled(her.key)},
     }
 
 

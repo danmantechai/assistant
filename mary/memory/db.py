@@ -149,23 +149,132 @@ def _v3(c: sqlite3.Connection) -> None:
     c.execute("ALTER TABLE photos ADD COLUMN faces_model TEXT NOT NULL DEFAULT ''")   # which models have read it for faces
 
 
+_SCHEMA_CACHE: dict[int, tuple[list[tuple[str, str]], dict[str, list[tuple]]]] = {}
+
+
+def _expected_schema(upto: list) -> tuple[list[tuple[str, str]], dict[str, list[tuple]]]:
+    key = len(upto)
+    if key not in _SCHEMA_CACHE:
+        fresh = sqlite3.connect(":memory:")
+        try:
+            for fn in upto:
+                fn(fresh)
+            tables = [
+                (r[0], r[1] or "")
+                for r in fresh.execute(
+                    "SELECT name, sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' "
+                    "AND name NOT LIKE '%_fts%' AND name NOT LIKE '%_terms%'"
+                ).fetchall()
+            ]
+            cols = {name: fresh.execute(f"PRAGMA table_info({name})").fetchall() for name, _ in tables}
+            _SCHEMA_CACHE[key] = (tables, cols)
+        finally:
+            fresh.close()
+    return _SCHEMA_CACHE[key]
+
+
+def _repair_columns(c: sqlite3.Connection, upto: list) -> None:
+    """Ensure every table in `c` has all columns defined by migrations in `upto` (repairs half-made or older draft files)."""
+    tables, cols_by_table = _expected_schema(upto)
+    existing = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+    for table, create_sql in tables:
+        if table not in existing:
+            if create_sql:
+                c.execute(create_sql)
+            continue
+        have = {r[1] for r in c.execute(f"PRAGMA table_info({table})")}
+        for _, name, kind, notnull, default, _pk in cols_by_table[table]:
+            if name not in have:
+                tail = f" DEFAULT {default}" if default is not None else (" DEFAULT ''" if notnull else "")
+                c.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}{tail}")
+
+
 def _v4(c: sqlite3.Connection) -> None:
     """Repair: a file made while the photo tables were still being written can lack a column that format 2 now has. Every column
     the current format-2 tables have and this file's don't is added (so a half-made file is brought level, not refused)."""
-    fresh = sqlite3.connect(":memory:")
-    try:
-        _v2(fresh)
-        for table in ("photo_folders", "photos", "photo_files", "photo_ignored"):
-            have = {r[1] for r in c.execute(f"PRAGMA table_info({table})")}
-            for _, name, kind, notnull, default, _pk in fresh.execute(f"PRAGMA table_info({table})").fetchall():
-                if name not in have:
-                    tail = f" DEFAULT {default}" if default is not None else (" DEFAULT ''" if notnull else "")
-                    c.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}{tail}")
-    finally:
-        fresh.close()
+    _repair_columns(c, [_v1, _v2, _v3])
 
 
-MIGRATIONS = [_v1, _v2, _v3, _v4]
+def _v5_tables(c: sqlite3.Connection) -> None:
+    for col, spec in (
+        ("sharpness", "REAL NOT NULL DEFAULT 0.0"),
+        ("image_model", "TEXT NOT NULL DEFAULT ''"),
+        ("seen_model", "TEXT NOT NULL DEFAULT ''"),
+        ("seen_raw", "TEXT NOT NULL DEFAULT ''"),
+        ("seen_faces", "TEXT NOT NULL DEFAULT ''"),
+        ("seen", "TEXT NOT NULL DEFAULT ''"),
+        ("tags", "TEXT NOT NULL DEFAULT ''"),
+    ):
+        have = {r[1] for r in c.execute("PRAGMA table_info(photos)")}
+        if col not in have:
+            c.execute(f"ALTER TABLE photos ADD COLUMN {col} {spec}")
+    c.execute("""CREATE TABLE IF NOT EXISTS moments(
+        id INTEGER PRIMARY KEY, owner TEXT NOT NULL, library TEXT NOT NULL,
+        title TEXT NOT NULL DEFAULT '',           -- only what the person typed when renaming
+        summary TEXT NOT NULL DEFAULT '',         -- e.g. "June 1998 · the coast · a wedding · Grandma, Kofi"
+        theme TEXT NOT NULL DEFAULT '',           -- event/scene phrase from album, caption or tags
+        start TEXT NOT NULL DEFAULT '', end TEXT NOT NULL DEFAULT '',
+        precision TEXT NOT NULL DEFAULT '',       -- second | day | month | year | decade | ''
+        guess INTEGER NOT NULL DEFAULT 0,
+        place TEXT NOT NULL DEFAULT '', country TEXT NOT NULL DEFAULT '',
+        cover_id INTEGER, photos INTEGER NOT NULL DEFAULT 0,
+        mentions INTEGER NOT NULL DEFAULT 0, last_mentioned TEXT NOT NULL DEFAULT '',
+        how TEXT NOT NULL DEFAULT 'auto',         -- auto | you (renamed, merged or split by the person)
+        created TEXT NOT NULL, updated TEXT NOT NULL, fmt INTEGER NOT NULL DEFAULT 1)""")
+    for col, spec in (
+        ("mentions", "INTEGER NOT NULL DEFAULT 0"),
+        ("last_mentioned", "TEXT NOT NULL DEFAULT ''"),
+    ):
+        have_m = {r[1] for r in c.execute("PRAGMA table_info(moments)")}
+        if col not in have_m:
+            c.execute(f"ALTER TABLE moments ADD COLUMN {col} {spec}")
+    c.execute("CREATE INDEX IF NOT EXISTS moments_when ON moments(owner, library, start)")
+    c.execute("""CREATE TABLE IF NOT EXISTS moment_photos(
+        moment_id INTEGER NOT NULL, photo_id INTEGER NOT NULL PRIMARY KEY,
+        owner TEXT NOT NULL, library TEXT NOT NULL,
+        rank INTEGER NOT NULL DEFAULT 0,          -- 0 is the best photo (cover), then 1, 2, ...
+        how TEXT NOT NULL DEFAULT 'auto')""")     # auto | you
+    c.execute("CREATE INDEX IF NOT EXISTS moment_photos_moment ON moment_photos(moment_id, rank)")
+    c.execute("CREATE INDEX IF NOT EXISTS moment_photos_owner ON moment_photos(owner, library, moment_id)")
+    c.execute("""CREATE TABLE IF NOT EXISTS moment_nots(
+        owner TEXT NOT NULL, library TEXT NOT NULL,
+        a INTEGER NOT NULL, b INTEGER NOT NULL, added TEXT NOT NULL,
+        PRIMARY KEY(owner, library, a, b))""")
+
+
+def _v5(c: sqlite3.Connection) -> None:
+    """Seeing and moments (Phase 4): picture embeddings (stored in `vectors` under space 'image', ref_table 'photos'),
+    a vision description and tags per photo (with face boxes numbered [1], [2] so names come only from `people`),
+    and moments (photos grouped by time and place into events)."""
+    _v5_tables(c)
+    _repair_columns(c, [_v1, _v2, _v3, _v5_tables])
+    c.execute("DROP TABLE IF EXISTS photos_fts")
+    c.execute("CREATE VIRTUAL TABLE photos_fts USING fts5(text, caption, album, place, seen, tags, "
+              "tokenize='unicode61 remove_diacritics 2')")
+    c.execute("INSERT INTO photos_fts(rowid, text, caption, album, place, seen, tags) "
+              "SELECT id, text, caption, album, trim(place || ' ' || region || ' ' || country), seen, tags FROM photos")
+
+
+def _v6_tables(c: sqlite3.Connection) -> None:
+    c.execute("""CREATE TABLE IF NOT EXISTS persona_links(
+        owner TEXT NOT NULL, library TEXT NOT NULL,
+        persona TEXT NOT NULL,                    -- the persona's folder name (user/personas/<persona>)
+        person_id INTEGER NOT NULL,               -- the person (in `people`) this persona is modelled on
+        born INTEGER NOT NULL DEFAULT 0,          -- their birth year when the person said it (0: not said), for "your 60th birthday"
+        created TEXT NOT NULL DEFAULT '', fmt INTEGER NOT NULL DEFAULT 1,
+        PRIMARY KEY(owner, library, persona))""")
+    c.execute("CREATE INDEX IF NOT EXISTS persona_links_person ON persona_links(owner, library, person_id)")
+
+
+def _v6(c: sqlite3.Connection) -> None:
+    """Persona memories (Phase 6): a persona can be modelled on one person in `people`; moments that person is in reach her as
+    her own memories."""
+    _v6_tables(c)
+    _repair_columns(c, SCHEMA_STEPS)
+
+
+MIGRATIONS = [_v1, _v2, _v3, _v4, _v5, _v6]
+SCHEMA_STEPS = [_v1, _v2, _v3, _v5_tables, _v6_tables]   # what _repair_columns brings an already-current file level with
 
 
 class Database:
@@ -220,6 +329,8 @@ class Database:
                 f"The memory file {self.path.name} was made by a newer MARY (format {version}, this one reads up "
                 f"to {len(MIGRATIONS)}). Update MARY, or move that file aside to start a new memory.")
         if version == len(MIGRATIONS):
+            with self.tx():
+                _repair_columns(c, SCHEMA_STEPS)
             return
         if version > 0:
             self._backup(version)

@@ -291,3 +291,48 @@ def test_the_photo_settings_are_ordinary_settings_and_the_page_script_has_the_pa
     assert "function pagePhotos" in js and '["photos", "Photos"]' in js and "Coming soon" not in js
     body = js.split("function pagePhotos")[1].split("function pageRemembered")[0]
     assert "innerHTML" not in body and "originals" in body
+
+
+def test_moments_can_be_browsed_renamed_merged_and_split_from_the_page(srv):
+    s, lib, ing, root, truth = srv
+    added(srv)
+    status, mlist = call(s, "GET", "/api/photos/moments")
+    assert status == 200 and mlist["total"] >= 2
+    first = mlist["items"][0]
+    assert first["thumb"].startswith("/thumb/") and first["photos"] >= 2
+
+    # Open one moment and filter photos by moment
+    status, detail = call(s, "GET", f"/api/photos/moments/{first['id']}")
+    assert status == 200 and len(detail["items"]) == first["photos"]
+    assert call(s, "GET", f"/api/photos/list?moment={first['id']}")[1]["total"] == first["photos"]
+    assert call(s, "GET", "/api/photos/moments/999999")[0] == 400
+
+    # Rename
+    status, renamed = call(s, "POST", "/api/photos/moments/rename", {"id": first["id"], "title": "Our holiday"})
+    assert status == 200 and renamed["title"] == "Our holiday" and "Our holiday" in renamed["summary"]
+
+    # Split and merge back
+    pids = [i["id"] for i in detail["items"]]
+    status, split_m = call(s, "POST", "/api/photos/moments/split", {"id": first["id"], "ids": [pids[-1]], "title": "Part two"})
+    assert status == 200 and split_m["photos"] == 1 and split_m["title"] == "Part two"
+    status, merged = call(s, "POST", "/api/photos/moments/merge", {"keep": first["id"], "other": split_m["id"]})
+    assert status == 200 and merged["photos"] == first["photos"]
+
+
+def test_clip_models_and_vision_switch_on_the_page(srv, monkeypatch):
+    from mary.photos import clip
+
+    s, lib, ing, root, truth = srv
+    asked = []
+    monkeypatch.setattr(clip, "fetch", lambda folder, get=None: (asked.append(folder), {"vision": "ok", "text": "ok"})[1])
+    assert asked == []
+    status, out = call(s, "POST", "/api/photos/clip", {})
+    assert status == 200 and out["mb"] > 500 and len(asked) == 1
+
+    monkeypatch.setattr(clip, "fetch", lambda folder, get=None: (_ for _ in ()).throw(OSError("offline")))
+    status, err = call(s, "POST", "/api/photos/clip", {})
+    assert status == 400 and "Couldn't fetch the picture search models" in err["error"]
+
+    status, v = call(s, "POST", "/api/photos/vision", {"enabled": True, "allow_cloud": False})
+    assert status == 200 and v["enabled"] is True and v["allow_cloud"] is False
+

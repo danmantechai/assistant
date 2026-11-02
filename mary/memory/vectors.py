@@ -103,6 +103,21 @@ class VectorIndex:
                 if t == table:
                     s.drop(ref_id)
 
+    def delete_space(self, space: str, table: str, ref_id: int | None = None) -> None:
+        """Drop one space's vector for `ref_id` (or all rows in `(space, table)` when `ref_id` is None)."""
+        with self._lock:
+            with self.db.tx() as c:
+                if ref_id is None:
+                    c.execute("DELETE FROM vectors WHERE space=? AND ref_table=?", (space, table))
+                else:
+                    c.execute("DELETE FROM vectors WHERE space=? AND ref_table=? AND ref_id=?", (space, table, int(ref_id)))
+            s = self._spaces.get((space, table))
+            if s is not None:
+                if ref_id is None:
+                    self._spaces.pop((space, table), None)
+                else:
+                    s.drop(int(ref_id))
+
     def purge_other_models(self, space: str, model: str, table: str = "memory") -> int:
         """Drop the vectors another model made (they must be made again)."""
         with self._lock:

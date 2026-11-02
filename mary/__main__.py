@@ -80,6 +80,8 @@ def run_voice_mode(cfg, debug: bool, background: bool = False, restarted: bool =
     app = QApplication(sys.argv[:1])
     app.setQuitOnLastWindowClosed(False)
     hud = HudWindow(cfg)
+    from mary.avatar.director import AvatarDirector
+    hud.set_avatar(AvatarDirector(getattr(cfg, "persona", "mary")), getattr(cfg, "persona", "mary"))
     hud_out = HudOutput(hud)
     session = SimpleNamespace(loop=None, stop=threading.Event(), restart=False)
 
@@ -221,6 +223,8 @@ def voice_session(cfg, debug: bool, hud_out, session, tray, background: bool = F
     tts = make_voice(cfg, kokoro, on_problem=lambda m: (console.status(f"⚠ {m}"), tray_out.status(m)))
     speaker = Speaker(cfg.audio.output_device, cfg.tts.volume, on_level=hud_out.level)
     voice_out = VoiceOutput(tts, speaker)
+    voice_out.on_audio = hud_out.speech_audio
+    voice_out.on_stop = hud_out.speech_stopped
     voice_out.on_problem = lambda message: (console.status(f"⚠ {message}"), tray_out.status(message))
     if hasattr(tts, "client"):
         print(f"{console.DIM}  Voice: {tts.name}, the voice in tts.elevenlabs.voice_id (Kokoro if it can't be "
@@ -349,6 +353,8 @@ def run_with_hud(cfg, debug: bool) -> None:
     app = QApplication(sys.argv[:1])
     app.setQuitOnLastWindowClosed(False)
     hud = HudWindow(cfg)
+    from mary.avatar.director import AvatarDirector
+    hud.set_avatar(AvatarDirector(getattr(cfg, "persona", "mary")), getattr(cfg, "persona", "mary"))
     hud_out = HudOutput(hud)
 
     def on_hotkey() -> None:

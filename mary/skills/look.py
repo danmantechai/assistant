@@ -33,8 +33,31 @@ def window_png(win, part: str | None = None) -> bytes:
     return out.getvalue()
 
 
+def photo_png(lib, pid: int) -> tuple[bytes | None, list[int]]:
+    """Load photo `pid` from `lib` as PNG bytes (with numbered face boxes if faces are known) so `look` can inspect it."""
+    import os
+    from pathlib import Path
+    from PIL import Image, ImageOps
+    from mary.photos import see
+
+    paths = [p for p in lib.file_paths(pid) if os.path.exists(p)]
+    thumb = lib.thumb_path(pid)
+    src = Path(paths[0]) if paths else (thumb if thumb.exists() else None)
+    if src is None:
+        return None, []
+    with Image.open(src) as im:
+        im = ImageOps.exif_transpose(im).convert("RGB")
+    faces = lib.people.faces_for_vision(pid)
+    if faces:
+        im = see.draw_face_boxes(im, faces)
+    out = io.BytesIO()
+    im.save(out, format="PNG")
+    return out.getvalue(), [int(f["id"]) for f in faces]
+
+
 def tools(ctx: ToolContext) -> list[Tool]:
-    def look(question: str, target: str | None = None, part: str | None = None) -> ToolResult:
+    def look(question: str, target: str | None = None, part: str | None = None,
+             photo_id: int | None = None) -> ToolResult:
         from mary import vision
         from mary.skills.read_screen import _target_window
 
@@ -42,6 +65,35 @@ def tools(ctx: ToolContext) -> list[Tool]:
         if model is None:
             return ToolResult(False, "No model that can see images is set up (vision.model in config.yaml); "
                                      "read_screen can still read the text.")
+        if photo_id is not None and int(photo_id) > 0:
+            lib = getattr(ctx, "photos", None) or getattr(ctx.memory, "photos", None)
+            if lib is None or lib.get(int(photo_id)) is None:
+                return ToolResult(False, f"Photo #{photo_id} isn't in the library.")
+            pid = int(photo_id)
+            png, face_ids = photo_png(lib, pid)
+            if png is None:
+                return ToolResult(False, f"Photo #{pid}'s file isn't on this PC right now.")
+            prompt = question
+            if face_ids:
+                tags = ", ".join(f"[{i + 1}]" for i in range(len(face_ids)))
+                prompt = (f"{question} (Refer to any numbered faces only by their box tag {tags}; "
+                          "never guess a person's name.)")
+            try:
+                answer = vision.look(png, prompt, ctx.cfg, model)
+            except Exception as e:
+                log.warning("look on photo %d failed: %s", pid, e)
+                return ToolResult(False, f"Couldn't look at photo #{pid}: {e}")
+            from mary.photos import see
+
+            known_names = [r["name"] for r in lib._all(
+                "SELECT name FROM people WHERE owner=? AND library=? AND name<>''", (lib.owner, lib.lib))]
+            clean = see.sanitize_description(answer, len(face_ids), forbidden_names=known_names)
+            resolved = see.resolve_description(clean, face_ids, lib._face_names_for_photo(pid))
+            m = lib.moments_store.for_photo(pid)
+            if m:
+                lib.touch_moment(m["id"])
+            return ToolResult(True, f"Looking at photo #{pid}: {resolved}")
+
         win = _target_window(target)
         if win is None:
             return ToolResult(False, f"No window matches '{target}'." if target else "No window to look at.")
@@ -54,9 +106,13 @@ def tools(ctx: ToolContext) -> list[Tool]:
 
     return [Tool(
         "look",
-        "Look at a window (or one area of it) with a model that can see, and answer a question about how it looks "
-        "or what a picture shows.",
-        {"question": {"type": "string", "description": "what to find out, e.g. 'what is in the photo?'"},
+        "Look at a window (or one area of it), or look at a photo from the library again for a detail its record "
+        "doesn't hold, with a model that can see.",
+        {"question": {"type": "string", "description": "what to find out, e.g. 'what colour is the cake?'"},
          "target": {"type": "string", "description": "app or window; omit for the one in front"},
-         "part": {"type": "string", "description": "an area: 'main area', 'left panel', or words it shows"}},
-        ["question"], look, private=True, acts_on="target", announce=lambda a: "Looking…")]
+         "part": {"type": "string", "description": "an area: 'main area', 'left panel', or words it shows"},
+         "photo_id": {"type": "integer", "description": "photo #id from your photo library to look at again"}},
+        ["question"], look, private=True, acts_on="target",
+        watch=lambda a: not a.get("photo_id"),
+        announce=lambda a: "Looking at the photo…" if a.get("photo_id") else "Looking…")]
+

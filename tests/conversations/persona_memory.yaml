@@ -1,0 +1,17 @@
+# Persona memories in conversation (Phase 6).
+# A persona linked to Grandma (born 1938) recalls moments featuring her as first-person memories.
+name: Persona memories in conversation
+real: [memory, photos]
+photos: moments_set
+persona_link:
+  person: Grandma
+  born: 1938
+turns:
+  - user: "Remember your 60th birthday?"
+    expect:
+      mentions: ["wedding|coast|1998|June|Kofi|I|my|me"]
+      avoid: [web, open_app]
+  - user: "Do you have any photos from when you were 20?"
+    expect:
+      mentions: ["don't have|do not have|no photos|none from 1958|aren't any"]
+      avoid: [web, open_app]

@@ -160,7 +160,106 @@
     g.stroke();
   }
 
+  // ------------------------------------------------------------------ avatar
+  const reactor = document.querySelector(".reactor");
+  const avatar = $("avatar");
+  const avatarBase = $("avatar-base");
+  const avatarEyes = $("avatar-eyes");
+  const avatarMouth = $("avatar-mouth");
+
+  let avatarData = null;
+  let avatarBaseUrl = "";
+  let avatarVersion = "";
+  const avatarUrl = (file) => avatarBaseUrl + "/" + file + (avatarVersion ? "?v=" + avatarVersion : "");
+  let avatarEnabled = false;
+  let posesByName = {};
+  let curPose = "", curEyes = "", curMouth = "";
+
+  function avatarConfig(manifest, basePath, enabled) {
+    if (!manifest) {
+      avatarData = null;
+      avatarToggle(false);
+      return;
+    }
+    avatarData = manifest;
+    avatarBaseUrl = (basePath || "").replace(/\/+$/, "");
+    avatarVersion = encodeURIComponent(manifest.created || "");   // a remade face has the same file names
+    posesByName = {};
+    for (const p of (manifest.poses || [])) {
+      posesByName[p.name || "center"] = p;
+    }
+    curPose = ""; curEyes = ""; curMouth = "";
+    avatarToggle(!!enabled);
+    avatarFrame("center", "open", "X");
+  }
+
+  function avatarToggle(on) {
+    avatarEnabled = !!on;
+    if (reactor) {
+      reactor.classList.toggle("mode-avatar", avatarEnabled && !!avatarData);
+    }
+  }
+
+  function avatarFrame(pose, eyeState, mouthShape) {
+    if (!avatarData || !avatarEnabled) return;
+    const p = posesByName[pose] || posesByName["center"] || (avatarData.poses && avatarData.poses[0]);
+    if (!p) return;
+
+    if (pose !== curPose && p.base) {
+      avatarBase.src = avatarUrl(p.base);
+      curPose = pose;
+      curEyes = ''; curMouth = '';     // each pose has its own patches, made to line up with it
+    }
+
+    // Eyes
+    if (eyeState !== curEyes) {
+      curEyes = eyeState;
+      if (eyeState === "open" || !p.eyes || !p.eyes[eyeState]) {
+        avatarEyes.style.display = "none";
+      } else {
+        const eyeInfo = p.eyes[eyeState];
+        const rect = eyeInfo.rect || [0, 0, 100, 100];
+        const sz = avatarData.size || [512, 512];
+        avatarEyes.style.left = (rect[0] / sz[0] * 100).toFixed(2) + "%";
+        avatarEyes.style.top = (rect[1] / sz[1] * 100).toFixed(2) + "%";
+        avatarEyes.style.width = (rect[2] / sz[0] * 100).toFixed(2) + "%";
+        avatarEyes.style.height = (rect[3] / sz[1] * 100).toFixed(2) + "%";
+        avatarEyes.src = avatarUrl(eyeInfo.file);
+        avatarEyes.style.display = "block";
+      }
+    }
+
+    // Mouth
+    if (mouthShape !== curMouth) {
+      curMouth = mouthShape;
+      const mouthUpper = (mouthShape || "X").toUpperCase();
+      if (mouthUpper === "X" || !p.mouth || !p.mouth[mouthUpper]) {
+        avatarMouth.style.display = "none";
+      } else {
+        const mInfo = p.mouth[mouthUpper];
+        const rect = mInfo.rect || [0, 0, 100, 100];
+        const sz = avatarData.size || [512, 512];
+        avatarMouth.style.left = (rect[0] / sz[0] * 100).toFixed(2) + "%";
+        avatarMouth.style.top = (rect[1] / sz[1] * 100).toFixed(2) + "%";
+        avatarMouth.style.width = (rect[2] / sz[0] * 100).toFixed(2) + "%";
+        avatarMouth.style.height = (rect[3] / sz[1] * 100).toFixed(2) + "%";
+        avatarMouth.src = avatarUrl(mInfo.file);
+        avatarMouth.style.display = "block";
+      }
+    }
+  }
+
+  if (avatar) {
+    avatar.addEventListener("click", () => {
+      avatarToggle(false);
+      if (window.hudBridge && window.hudBridge.onAvatarToggle) {
+        window.hudBridge.onAvatarToggle(false);
+      }
+    });
+  }
+
   window.hud = { show, hide, state: setState, user, replyStart, replyDelta, replyEnd,
-                 log: logLine, notify, ask, level: setLevel };
+                 log: logLine, notify, ask, level: setLevel,
+                 avatarConfig, avatarToggle, avatarFrame };
   refreshPanel();
 })();

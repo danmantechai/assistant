@@ -49,7 +49,9 @@ class ToolContext:
     last_launch: tuple[int, float] | None = None  # (hwnd, when its window appeared) after an app was started
     loop: Any = None          # the feedback loop around every tool call (mary/ready.py); made by the registry
     profile: Any = None       # Profile: what the user asked MARY to remember
-    memory: Any = None        # MemoryStore: the diary, the facts she has learned, and (later) the photos
+    memory: Any = None        # MemoryStore: the diary, the facts she has learned, and the photos
+    photos: Any = None        # PhotoLibrary: the user's photo collection and moments
+    shown_photos: list[int] = field(default_factory=list)  # photo IDs opened by show_photo in this session
     did: list = field(default_factory=list)   # this request's tool calls (name, ok, private), for the diary: never results
     request: str = ""         # the user's current words, for intent grounding
     prev_request: str = ""    # the turn before (answers like "Spotify" to "which app?")

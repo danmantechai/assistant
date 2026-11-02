@@ -15,6 +15,8 @@ class HudOutput(Output):
         self.w.js.emit(f"hud.{fn}({', '.join(json.dumps(a) for a in args)})")
 
     def state(self, name: str) -> None:
+        if getattr(self.w, "director", None) is not None:
+            self.w.director.set_state(name)
         if name == IDLE:
             # The request is done: calm cyan look, then fade out after hud.hide_after_s.
             self._js("state", "listening")
@@ -22,6 +24,14 @@ class HudOutput(Output):
         else:
             self.w.command.emit("activity")
             self._js("state", name)
+
+    def speech_audio(self, audio, sample_rate: int = 24000, starts_at: float | None = None) -> None:
+        if getattr(self.w, "director", None) is not None:
+            self.w.director.feed_audio(audio, sample_rate=sample_rate, starts_at=starts_at)
+
+    def speech_stopped(self) -> None:
+        if getattr(self.w, "director", None) is not None:
+            self.w.director.stop_speech()
 
     def user_text(self, text: str) -> None:
         self.w.command.emit("activity")

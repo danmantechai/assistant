@@ -35,6 +35,26 @@ DEFAULTS = {
         "alone": 0.05,           # a single face needs this much more to join a group
         "same": 0.30,            # two groups this alike are offered as "the same person?"
     },
+    # Picture embeddings (Phase 4): CLIP image–text vectors in `vectors` (space='image', ref_table='photos').
+    "clip": {
+        "enabled": True,
+        "models": "{project}/data/models/fastembed",
+        "threads": 2,
+        "min_score": 0.22,       # minimum cosine for a picture search match
+        "similar_score": 0.80,   # minimum cosine for visually similar photos
+    },
+    # Vision descriptions and tags (Phase 4): runs only while idle and plugged in. Cloud is opt-in only.
+    "vision": {
+        "enabled": True,
+        "model": "",             # empty: uses vision.model from config.yaml (or smallest local vision model)
+        "allow_cloud": False,    # opt-in only: photos never leave this PC unless turned on
+        "idle_s": 300,           # wait until the PC has been idle for 5 minutes (and not on battery)
+    },
+    # Moments (Phase 4): photos grouped by time and place into events.
+    "moments": {
+        "gap_hours": 8.0,
+        "min_photos": 2,
+    },
 }
 
 

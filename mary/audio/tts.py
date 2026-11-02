@@ -264,6 +264,8 @@ class VoiceOutput(Output):
         self._pending_lock = threading.Lock()
         self.first_audio_at: float | None = None   # for latency: when the first reply audio was queued
         self.on_problem = None                     # called once with a message when speaking fails
+        self.on_audio = None                       # called with each sentence's audio and when it will start playing
+        self.on_stop = None                        # called when speech is cut off (barge-in)
         self._failing = False
         threading.Thread(target=self._synth_loop, name="tts", daemon=True).start()
 
@@ -286,6 +288,11 @@ class VoiceOutput(Output):
                 audio = self.tts.synth(text)
                 if self.first_audio_at is None:
                     self.first_audio_at = time.perf_counter()
+                if self.on_audio:
+                    try:
+                        self.on_audio(audio, starts_at=max(time.monotonic(), getattr(self.speaker, "busy_until", 0.0)))
+                    except Exception:
+                        pass
                 self.speaker.play(audio)
                 self._failing = False
             except Exception as e:  # no output device, or the voice model failed: replies stay as text
@@ -347,6 +354,11 @@ class VoiceOutput(Output):
             except queue.Empty:
                 break
         self.speaker.stop()
+        if self.on_stop:
+            try:
+                self.on_stop()
+            except Exception:
+                pass
 
     def confirm(self, question: str) -> bool:
         """Say the question, then listen for yes/no. Silence or anything unclear means no."""
