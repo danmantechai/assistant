@@ -26,7 +26,6 @@ voice she speaks in.
   - click, type and scroll in any app or web page
   - screenshots, notes and timers
   - PowerShell (always shows the command and asks first)
-  - Spotify, WhatsApp, the weather, the web
 - **Read your screen** and answer questions about it.
 - **Remember** what you ask her to ("remember that I prefer Edge"), and your name.
 - **Stay safe.** Every action needs words of its kind in what you said, so a misheard sentence can't close
