@@ -10,7 +10,7 @@ from mary.config import Section, load_config
 from mary.memory import clock
 from mary.memory.diary import Did, Diary, cut, line
 from mary.memory.embed import HashEmbedder
-from mary.memory.store import MemoryStore
+from mary.memory.store import MemoryStore, clean
 from mary.output import Output
 
 
@@ -40,6 +40,14 @@ def test_quotes_are_softened_and_long_words_are_cut():
     assert len(cut("word " * 100, 60)) <= 61 and cut("One. Two. Three. " * 20, 40).endswith(".")
     long = line("x" * 1000, [], "y" * 1000, request_chars=50, reply_chars=30)
     assert len(long) < 150
+
+
+def test_user_words_and_reply_are_kept_in_full():
+    long_req = "Here is my detailed plan: " + ("word " * 600)
+    long_rep = "I have noted your entire plan: " + ("details " * 300)
+    got = line(long_req, [], long_rep)
+    assert clean(long_req) in got
+    assert clean(long_rep) in got
 
 
 def test_a_request_with_nothing_to_say_has_no_line(tmp_path):

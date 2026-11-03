@@ -61,6 +61,21 @@ class Hit:
     relevance: float
     score: float
     how: str        # words | meaning | words+meaning | dates
+    passage: str | None = None
+
+
+def best_passage_for_words(passages: list[str], words: list[tuple[str, bool]]) -> str:
+    if not passages:
+        return ""
+    if not words:
+        return passages[0]
+    names = {w for w, _ in words}
+
+    def score(p: str) -> int:
+        p_tokens = set(_tokens(p))
+        return sum(1 for w in names if w in p_tokens)
+
+    return max(passages, key=score)
 
 
 def _idf(n: int, df: int) -> float:
@@ -105,20 +120,28 @@ def keyword_relevance(store: MemoryStore, words: list[tuple[str, bool]], kinds, 
     return out
 
 
-def meaning_relevance(store: MemoryStore, question: str, allowed: np.ndarray, limit: int = 50) -> dict[int, float]:
+def meaning_relevance(store: MemoryStore, question: str, allowed: np.ndarray, limit: int = 50,
+                      return_ords: bool = False) -> dict[int, float] | tuple[dict[int, float], dict[int, int]]:
     if not store.meaning or not len(allowed):
-        return {}
+        return ({}, {}) if return_ords else {}
     lo, hi = store.setting("recall.cosine_low"), store.setting("recall.cosine_high")
     q = store.embedder.embed_query(question)
-    return {i: min(1.0, max(0.0, (cos - lo) / (hi - lo))) for i, cos in store.vectors.top("text", q, limit, allowed)}
+    raw = store.vectors.top("text", q, limit, allowed, return_ords=True)
+    scores = {i: min(1.0, max(0.0, (cos - lo) / (hi - lo))) for i, cos, _ in raw}
+    if return_ords:
+        ords = {i: ord_val for i, _, ord_val in raw}
+        return scores, ords
+    return scores
 
 
 def search(store: MemoryStore, query: str, *, kinds=None, since: datetime | None = None, until: datetime | None = None,
            current: bool | None = True, k: int = 5, min_relevance: float | None = None,
-           now: datetime | None = None, dates: bool = True, cue: bool = False) -> list[Hit]:
+           now: datetime | None = None, dates: bool = True, cue: bool = False,
+           min_relevance_diary: float | None = None) -> list[Hit]:
     """The best records for a question. A past date in the words ("last Tuesday") narrows it to those days; a
     question that is only a date lists that stretch of the memory, most important first. `cue`: the sentence is
-    about the past (lets "on Friday" or "in May" count)."""
+    about the past (lets "on Friday" or "in May" count). `min_relevance_diary`: strict bar for diary entries when
+    not requested with a past cue."""
     now = now or clock.now()
     kinds = list(kinds) if kinds else None
     threshold = store.setting("recall.min_relevance") if min_relevance is None else min_relevance
@@ -135,16 +158,32 @@ def search(store: MemoryStore, query: str, *, kinds=None, since: datetime | None
     if not words:
         return []
     kw = keyword_relevance(store, words, kinds, current, since, until)
-    mv = meaning_relevance(store, when.strip(question, found), allowed)
+    mv, mv_ords = meaning_relevance(store, when.strip(question, found), allowed, return_ords=True)
     ids = list({*kw, *mv})
     memories = {m.id: m for m in _load(store, np.array(ids, dtype=np.int64))}
+    from mary.memory.embed import embedding_passages
+
     hits = []
     for i in ids:
+        if i not in memories:
+            continue
+        m = memories[i]
         a, b = kw.get(i, 0.0), mv.get(i, 0.0)
         relevance = max(a, b)
-        if relevance >= threshold and i in memories:
+        thresh = threshold
+        if m.kind == "diary" and min_relevance_diary is not None and not cue:
+            thresh = min_relevance_diary
+        if relevance >= thresh:
             how = "words+meaning" if a and b else "words" if a else "meaning"
-            hits.append(Hit(memories[i], relevance, _rank(store, memories[i], relevance, now), how))
+            passages = embedding_passages(m.kind, m.text)
+            passage = None
+            if len(passages) > 1:
+                ord_val = mv_ords.get(i)
+                if ord_val is not None and ord_val < len(passages):
+                    passage = passages[ord_val]
+                else:
+                    passage = best_passage_for_words(passages, words)
+            hits.append(Hit(m, relevance, _rank(store, m, relevance, now), how, passage=passage))
     return sorted(hits, key=lambda h: -h.score)[:k]
 
 

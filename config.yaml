@@ -288,8 +288,6 @@ memory:
     same_meaning: 0.90      # a new fact this close in meaning to a known one is merged with it
   diary:
     enabled: true
-    request_chars: 240
-    reply_chars: 160
   # The background pass: while nobody is using MARY or the PC, her model reads what you said and writes down the lasting
   # facts (and, if reflections is on, a sentence about each finished day). OFF unless you switch it on: with a model in
   # the cloud, what you said goes there (never her replies, and nothing from messages or the screen).

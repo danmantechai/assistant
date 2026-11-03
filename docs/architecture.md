@@ -77,13 +77,15 @@ space (`text` now; faces and pictures later), compared brute-force in a numpy ma
 | Kind | What | Written by |
 |---|---|---|
 | core | what you told her to "remember that…": stays in `user/profile.yaml`, pinned in every request, and is searchable | you |
-| diary | one line per request: your words, the skills used, what she said (never what a skill read out) | code, after each request |
+| diary | one line per request: your words in full word-for-word, the skills used, what she said in full (never what a skill read out) | code, after each request |
 | fact | something lasting you said ("My sister is Ama"), with its source line, importance, and an end date when replaced | the background pass, or you |
 | reflection | a sentence about a finished day | the background pass |
 
-- **Per request** (`recall.py`): facts and day summaries that match the words come along in the `<context>` block, the
-  diary only when you ask about the past ("what did we do yesterday"). Nothing is added when nothing matches well, and
-  a request never waits for it (if the meaning model is still loading the search is keywords only).
+- **Per request** (`recall.py`): facts and day summaries that match the words or meaning come along in the `<context>` block.
+  The diary joins whenever relevant: at the usual bar when asking about the past ("what did we do yesterday"), or by
+  meaning at a strict bar for chat so unrelated requests add nothing. For long entries, chunked passage vectors ensure details
+  deep in a message are found, and only the matching passage is placed in context with its date to keep prompt size small.
+  Nothing is added when nothing matches well, and a request never waits for it (if the meaning model is still loading the search is keywords only).
 - **Search** (`search.py`): code reads the dates ("last Tuesday", `when.py`) and names; keywords and meaning (bge-small,
   the router's model) are merged into a relevance; recency and importance only break ties. Tuned on a made-up month
   (`python -m mary.memory.bench`).

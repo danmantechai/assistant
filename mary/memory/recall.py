@@ -1,10 +1,10 @@
 """What the memory adds to a request: a few lines in the request's <context> block (after the cached prefix, so the
 cache is never touched), only when something matches well.
 
-Facts and day summaries that match the words of a request may come along with any request ("text Marcus" brings
-what's known about Marcus). The diary joins only when the request is about the past (a date, "remember", "did I", "last
-time", "you told me"): otherwise "what's the weather" would drag in every weather question ever asked. Anything else
-the model can still look up itself with the memory tool's recall.
+Facts and day summaries that match the words or meaning of a request may come along with any request ("text Marcus"
+brings what's known about Marcus). The diary joins whenever relevant: at the usual bar when the request is about the
+past (a date, "remember", "did I", "you told me"), or by meaning at a strict bar when unasked so unrelated chat adds
+nothing. When a long entry is recalled, only the matching passage is placed in context with its date to keep prompt size small.
 """
 from __future__ import annotations
 
@@ -96,7 +96,8 @@ def describe(h) -> str:
              "core": "you told me"}.get(m.kind, m.kind)
     if m.ended:
         label += f"; no longer true since {m.ended:%d %b}"
-    return f"remembered #{m.id} ({label}): {m.text}"
+    body = h.passage if getattr(h, "passage", None) else m.text
+    return f"remembered #{m.id} ({label}): {body}"
 
 
 def lines(store: MemoryStore, request: str, now: datetime | None = None) -> list[str]:
@@ -105,17 +106,24 @@ def lines(store: MemoryStore, request: str, now: datetime | None = None) -> list
     try:
         now = now or clock.now()
         cue = seeks_memory(request, now.date())
-        kinds = ["fact", "reflection", "diary"] if cue else ["fact", "reflection"]
+        kinds = ["fact", "reflection", "diary"]
         # Asked about the past or about the user's own life: the usual bar. Otherwise (a command, a chat) only strong
         # evidence comes along: a name the memory knows, or something that means the same.
         bar = store.setting("recall.min_relevance" if cue or asks_about_you(request) else "recall.min_relevance_unasked")
+        diary_bar = store.setting("recall.min_relevance") if cue else store.setting("recall.min_relevance_unasked")
         hits = store.search(request, kinds=kinds, current=None if wants_history(request) else True,
-                            k=store.setting("recall.max_items"), cue=cue, now=now, min_relevance=bar)
+                            k=store.setting("recall.max_items"), cue=cue, now=now, min_relevance=bar,
+                            min_relevance_diary=diary_bar)
     except Exception:
         log.exception("memory recall failed")
         return []
     out, budget = [], store.setting("recall.max_tokens") * 3.8   # characters
     for h in hits:
+        if h.memory.kind == "diary" and not cue:
+            # Without a past cue, only diary passages from long entries or direct chat join by meaning;
+            # routine tool executions (volume, open app) stay out so ordinary commands don't drag in their past runs.
+            if "Used:" in h.memory.text and not getattr(h, "passage", None):
+                continue
         line = describe(h)
         if out and sum(map(len, out)) + len(line) > budget:
             break

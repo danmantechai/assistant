@@ -80,12 +80,29 @@ def parse_facts(text: str, now: datetime) -> tuple[list[Item], list[Item]]:
 
 
 def parse_diary(text: str, day: date) -> list[Item]:
-    items = []
+    items: list[Item] = []
+    current_time: str | None = None
+    parts: list[str] = []
+
+    def close():
+        if current_time and parts:
+            h, mi = (int(x) for x in (current_time or "12:00").split(":"))
+            item_text = clean(" ".join(parts))
+            if item_text:
+                items.append(Item(item_text, datetime.combine(day, datetime.min.time()) + timedelta(hours=h, minutes=mi)))
+
     for raw in text.splitlines():
-        m = _DIARY.match(raw.strip())
-        if m and not raw.strip().startswith("#"):
-            h, mi = (int(x) for x in (m["time"] or "12:00").split(":"))
-            items.append(Item(clean(m["text"]), datetime.combine(day, datetime.min.time()) + timedelta(hours=h, minutes=mi)))
+        line = raw.strip()
+        if not line or line.startswith("#") or line.startswith("<!--"):
+            continue
+        m = _DIARY.match(line)
+        if m:
+            close()
+            current_time = m["time"] or "12:00"
+            parts = [m["text"]]
+        elif current_time:
+            parts.append(line)
+    close()
     return items
 
 

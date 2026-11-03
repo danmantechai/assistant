@@ -420,6 +420,8 @@ class MemoryStore:
         """Make vectors for records that have none (new ones, or ones another model made)."""
         if not self.meaning:
             return 0
+        from mary.memory.embed import embedding_passages
+
         done = 0
         while True:
             rows = self.db.conn().execute(
@@ -428,8 +430,19 @@ class MemoryStore:
                 (SPACE, self.owner, self.library, limit)).fetchall()
             if not rows:
                 return done
-            vecs = self.embedder.embed_docs([embedding_text(r["kind"], r["text"]) for r in rows])
-            self.vectors.put_many(SPACE, [r["id"] for r in rows], vecs, self.vector_model)
+            all_texts: list[str] = []
+            ref_ids: list[int] = []
+            ords: list[int] = []
+            for r in rows:
+                passages = embedding_passages(r["kind"], r["text"])
+                if not passages:
+                    passages = [clean(r["text"]) or "empty"]
+                for o, p in enumerate(passages):
+                    all_texts.append(p)
+                    ref_ids.append(int(r["id"]))
+                    ords.append(o)
+            vecs = self.embedder.embed_docs(all_texts)
+            self.vectors.put_many(SPACE, ref_ids, vecs, self.vector_model, ords=ords)
             done += len(rows)
 
     def sync_core(self, facts: list[str]) -> None:

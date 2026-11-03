@@ -28,7 +28,7 @@ DEFAULTS = {
     "scoring": {"recency": 0.06, "importance": 0.04,
                 "half_life_days": {"diary": 14, "fact": 365, "core": 365, "reflection": 30}},
     "facts": {"same_meaning": 0.90},
-    "diary": {"enabled": True, "request_chars": 240, "reply_chars": 160},
+    "diary": {"enabled": True},
     "consolidate": {"enabled": False, "idle_minutes": 10, "only_on_ac": True, "min_lines": 6, "reflections": True},
 }
 

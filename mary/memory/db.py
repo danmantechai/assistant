@@ -55,11 +55,12 @@ def _v1(c: sqlite3.Connection) -> None:
     c.execute("CREATE TRIGGER memory_au AFTER UPDATE OF text ON memory BEGIN "
               "INSERT INTO memory_fts(memory_fts, rowid, text) VALUES ('delete', old.id, old.text); "
               "INSERT INTO memory_fts(rowid, text) VALUES (new.id, new.text); END")
-    # Meaning: one row per (space, thing). space = text now; face and image in later phases.
+    # Meaning: vectors by (space, thing, ord). space = text now; face and image in later phases.
     c.execute("""CREATE TABLE vectors(
         space TEXT NOT NULL, ref_table TEXT NOT NULL, ref_id INTEGER NOT NULL,
+        ord INTEGER NOT NULL DEFAULT 0,
         model TEXT NOT NULL, dim INTEGER NOT NULL, vec BLOB NOT NULL,
-        PRIMARY KEY(space, ref_table, ref_id))""")
+        PRIMARY KEY(space, ref_table, ref_id, ord))""")
     # The markdown files as MARY last wrote them: a different hash later means a hand edit.
     c.execute("CREATE TABLE sources(path TEXT PRIMARY KEY, sha TEXT NOT NULL, mtime REAL NOT NULL, "
               "size INTEGER NOT NULL, exported_id INTEGER NOT NULL)")
@@ -273,8 +274,35 @@ def _v6(c: sqlite3.Connection) -> None:
     _repair_columns(c, SCHEMA_STEPS)
 
 
-MIGRATIONS = [_v1, _v2, _v3, _v4, _v5, _v6]
-SCHEMA_STEPS = [_v1, _v2, _v3, _v5_tables, _v6_tables]   # what _repair_columns brings an already-current file level with
+def _v7_tables(c: sqlite3.Connection) -> None:
+    info = c.execute("PRAGMA table_info(vectors)").fetchall()
+    pk_cols = [r[1] for r in sorted(info, key=lambda x: x[5]) if r[5] > 0]
+    if "ord" not in pk_cols:
+        c.execute("""CREATE TABLE vectors_v7(
+            space TEXT NOT NULL, ref_table TEXT NOT NULL, ref_id INTEGER NOT NULL,
+            ord INTEGER NOT NULL DEFAULT 0,
+            model TEXT NOT NULL, dim INTEGER NOT NULL, vec BLOB NOT NULL,
+            PRIMARY KEY(space, ref_table, ref_id, ord))""")
+        has_ord = any(r[1] == "ord" for r in info)
+        if has_ord:
+            c.execute("INSERT INTO vectors_v7(space, ref_table, ref_id, ord, model, dim, vec) "
+                      "SELECT space, ref_table, ref_id, ord, model, dim, vec FROM vectors")
+        else:
+            c.execute("INSERT INTO vectors_v7(space, ref_table, ref_id, ord, model, dim, vec) "
+                      "SELECT space, ref_table, ref_id, 0, model, dim, vec FROM vectors")
+        c.execute("DROP TABLE vectors")
+        c.execute("ALTER TABLE vectors_v7 RENAME TO vectors")
+        c.execute("CREATE INDEX IF NOT EXISTS vectors_lookup ON vectors(space, ref_table, ref_id)")
+
+
+def _v7(c: sqlite3.Connection) -> None:
+    """Passage vectors (Phase 7): one record can have several vectors by ord for long passages."""
+    _v7_tables(c)
+    _repair_columns(c, SCHEMA_STEPS)
+
+
+MIGRATIONS = [_v1, _v2, _v3, _v4, _v5, _v6, _v7]
+SCHEMA_STEPS = [_v1, _v2, _v3, _v5_tables, _v6_tables, _v7_tables]   # what _repair_columns brings an already-current file level with
 
 
 class Database:

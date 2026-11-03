@@ -123,8 +123,8 @@ it when she starts). It never leaves this PC. "Remember to call Mum at five" is 
 fact, so it goes to the model. "Forget it" means "never mind" and never deletes a memory.
 
 **What she learns, and the diary (Memory v2).** Besides what you tell her to remember, MARY keeps a diary (one line
-for each thing you ask) in `user/memory/`. Ask her about it:
-- "What did we do yesterday?" / "What did I say about Marcus?" / "When is my meeting with the bank?"
+for each thing you ask, keeping your words in full, word-for-word) in `user/memory/`. Ask her about it:
+- "What did we do yesterday?" / "What did I say about Marcus?" / "When is my meeting with the bank?" / "What's the plan for Rome?"
 - "**Forget** that…" ends a memory and keeps it with its date; "**delete** it **for good**" removes it (she asks first)
 - Memory › Remembered on the settings page lists the diary by day, the facts she has learned, and lets you search, edit,
   forget or delete. The same memories are plain text in `user/memory/` (`facts.md`, `diary/`): edit them in Notepad.

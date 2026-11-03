@@ -69,8 +69,11 @@ _WORD = re.compile(r"[a-z0-9]+")
 
 # What is embedded is the sentence, not the scaffolding around it: a diary line is `Asked: "…". Used: tool. Replied: "…".`,
 # and "Asked:", "Used: create_note" and the quotes pull every line's meaning toward every other's.
-_DIARY = re.compile(r'^Asked: "(?P<asked>.*?)"(?: \(×\d+\))?\.(?: Used: .*?\.)?(?: Replied: "(?P<reply>.*?)"\.?)?$')
-RECIPE = 1   # bump when this changes: the vectors made the old way are then made again
+_DIARY = re.compile(r'^Asked: "(?P<asked>.*?)"(?: \(×\d+\))?\.(?: Used: .*?\.)?(?: Replied: "(?P<reply>.*?)"\.?)?$', re.DOTALL)
+RECIPE = 2   # bump when this changes: the vectors made the old way are then made again
+
+PASSAGE_CHARS = 400
+PASSAGE_OVERLAP = 100
 
 
 def embedding_text(kind: str, text: str) -> str:
@@ -80,6 +83,53 @@ def embedding_text(kind: str, text: str) -> str:
         if m:
             return f"{m['asked']}. {m['reply']}" if m["reply"] else m["asked"]
     return text
+
+
+def chunk_text(text: str, max_chars: int = PASSAGE_CHARS, overlap: int = PASSAGE_OVERLAP) -> list[str]:
+    """Split long text into overlapping passages that fit the embedding model.
+
+    Prefers splitting at sentence boundaries (. ! ? \n ;) in the second half of max_chars,
+    or at word boundaries (spaces). Overlaps consecutive passages by ~overlap chars so
+    facts spanning across boundaries aren't lost.
+    """
+    text = re.sub(r"\s+", " ", text or "").strip()
+    if len(text) <= max_chars:
+        return [text] if text else []
+
+    passages = []
+    start = 0
+    n = len(text)
+    while start < n:
+        end = min(start + max_chars, n)
+        if end < n:
+            sub = text[start:end]
+            cut = -1
+            for sep in (". ", "? ", "! ", "; "):
+                idx = sub.rfind(sep)
+                if idx >= max_chars // 2:
+                    cut = max(cut, idx + len(sep.rstrip()))
+            if cut > 0:
+                end = start + cut
+            else:
+                space_idx = sub.rfind(" ")
+                if space_idx >= max_chars // 2:
+                    end = start + space_idx
+        chunk = text[start:end].strip()
+        if chunk:
+            passages.append(chunk)
+        if end >= n:
+            break
+        step = max(1, (end - start) - overlap)
+        start += step
+    return passages
+
+
+def embedding_passages(kind: str, text: str, max_chars: int = PASSAGE_CHARS, overlap: int = PASSAGE_OVERLAP) -> list[str]:
+    """The passages to make a record's vectors from. Short entries return [text] (one vector)."""
+    full = embedding_text(kind, text)
+    if len(full) <= max_chars:
+        return [full] if full else []
+    return chunk_text(full, max_chars=max_chars, overlap=overlap)
 
 
 class HashEmbedder:

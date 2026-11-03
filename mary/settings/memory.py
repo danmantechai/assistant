@@ -93,8 +93,9 @@ def edit(mem, mid, text: str) -> dict:
     text = " ".join(str(text or "").split())
     if m.kind not in SHOWN:
         raise SettingsError("Change that one on the About you page.")
-    if not text or len(text) > (FACT_LIMIT if m.kind == "fact" else 600):
-        raise SettingsError("Write something short" if not text else f"Keep it under {FACT_LIMIT} characters.")
+    limit = FACT_LIMIT if m.kind == "fact" else 10000
+    if not text or len(text) > limit:
+        raise SettingsError("Write something short" if not text else f"Keep it under {limit} characters.")
     return item(need(mem).edit(m.id, text))
 
 
